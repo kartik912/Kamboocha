@@ -47,6 +47,7 @@ class PowerResolveRequest(BaseModel):
     self_position: int | None = Field(default=None, ge=0)
     target_player_id: str | None = None
     target_position: int | None = Field(default=None, ge=0)
+    skip_swap: bool = False
 
 
 class FinalizeTurnRequest(BaseModel):
@@ -83,6 +84,7 @@ class GamePlayerSummary(BaseModel):
 class ReactionSummary(BaseModel):
     latest_discard_code: str
     seconds_remaining: int
+    already_reacted: bool
 
 
 class PowerSummary(BaseModel):
@@ -139,6 +141,7 @@ def _room_response(room, session_player_id: str) -> RoomSummary:
             reaction_window = ReactionSummary(
                 latest_discard_code=room.game_setup.reaction_window.latest_discard.code,
                 seconds_remaining=seconds_remaining,
+                already_reacted=session_player_id in room.game_setup.reaction_window.attempted_player_ids,
             )
         power_state = None
         if room.game_setup.power_state is not None and room.game_setup.power_state.actor_player_id == session_player_id:
@@ -339,6 +342,7 @@ async def resolve_power(room_id: str, payload: PowerResolveRequest) -> RoomSumma
             self_position=payload.self_position,
             target_player_id=payload.target_player_id,
             target_position=payload.target_position,
+            skip_swap=payload.skip_swap,
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

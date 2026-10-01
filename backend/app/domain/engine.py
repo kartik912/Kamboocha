@@ -157,12 +157,13 @@ def swap_pending_card(game: GameSetup, player_id: str, position: int) -> GameSet
     slot = next((item for item in player.cards if item.position == position), None)
     if slot is None:
         raise ValueError("Card slot was not found.")
+    if slot.card is None:
+        raise ValueError("Select a card slot that already holds a card to swap with the drawn card.")
 
     replaced_card = slot.card
     slot.card = game.pending_drawn_card
     slot.known_to_player = False
-    if replaced_card is not None:
-        _push_discard_and_open_reaction(game, replaced_card, player_id=player_id)
+    _push_discard_and_open_reaction(game, replaced_card, player_id=player_id)
     game.pending_drawn_card = None
     _enter_post_turn(game)
     return game
@@ -174,6 +175,7 @@ def execute_power_action(
     self_position: int | None = None,
     target_player_id: str | None = None,
     target_position: int | None = None,
+    skip_swap: bool = False,
 ) -> GameSetup:
     sync_timers(game)
     if game.stage != GameStage.active:
@@ -219,27 +221,46 @@ def execute_power_action(
         game.power_state.awaiting_ready = True
         return game
 
-    own_slot = _get_slot(actor, self_position)
-    target_player = _get_other_player(game, player_id, target_player_id)
-    target_slot = _get_slot(target_player, target_position)
-    if own_slot.card is None or target_slot.card is None:
-        raise ValueError("Card slot was not found.")
+    if action == PowerAction.insight_swap:
+        if not game.power_state.awaiting_ready:
+            own_slot = _get_slot(actor, self_position)
+            target_player = _get_other_player(game, player_id, target_player_id)
+            target_slot = _get_slot(target_player, target_position)
+            if own_slot.card is None or target_slot.card is None:
+                raise ValueError("Card slot was not found.")
 
-    if action == PowerAction.insight_swap and not game.power_state.awaiting_ready:
-        game.power_state.selected_self_position = self_position
-        game.power_state.selected_target_player_id = target_player_id
-        game.power_state.selected_target_position = target_position
-        game.power_state.revealed_self_code = own_slot.card.code
-        game.power_state.revealed_target_code = target_slot.card.code
-        game.power_state.awaiting_ready = True
-        return game
+            game.power_state.selected_self_position = self_position
+            game.power_state.selected_target_player_id = target_player_id
+            game.power_state.selected_target_position = target_position
+            game.power_state.revealed_self_code = own_slot.card.code
+            game.power_state.revealed_target_code = target_slot.card.code
+            game.power_state.awaiting_ready = True
+            return game
 
-    if action == PowerAction.insight_swap and game.power_state.awaiting_ready:
+        if skip_swap:
+            _finish_power_discard(game, player_id)
+            return game
+
+        if target_player_id != game.power_state.selected_target_player_id:
+            raise ValueError("You can only swap with the player whose card you revealed.")
+
+        own_slot = _get_slot(actor, self_position)
+        target_player = _get_other_player(game, player_id, target_player_id)
+        target_slot = _get_slot(target_player, target_position)
+        if own_slot.card is None or target_slot.card is None:
+            raise ValueError("Card slot was not found.")
+
         own_slot.card, target_slot.card = target_slot.card, own_slot.card
         own_slot.known_to_player = False
         target_slot.known_to_player = False
         _finish_power_discard(game, player_id)
         return game
+
+    own_slot = _get_slot(actor, self_position)
+    target_player = _get_other_player(game, player_id, target_player_id)
+    target_slot = _get_slot(target_player, target_position)
+    if own_slot.card is None or target_slot.card is None:
+        raise ValueError("Card slot was not found.")
 
     own_slot.card, target_slot.card = target_slot.card, own_slot.card
     own_slot.known_to_player = False
@@ -287,6 +308,8 @@ def react_to_latest_discard(game: GameSetup, player_id: str, position: int) -> G
         raise ValueError("There is no active discard to match.")
     if game.reaction_window.source_player_id == player_id:
         raise ValueError("The player who made the discard cannot claim it back.")
+    if player_id in game.reaction_window.attempted_player_ids:
+        raise ValueError("You have already used your reaction for this discard.")
 
     player = next((item for item in game.players if item.player_id == player_id), None)
     if player is None:
@@ -295,6 +318,9 @@ def react_to_latest_discard(game: GameSetup, player_id: str, position: int) -> G
     slot = next((item for item in player.cards if item.position == position), None)
     if slot is None or slot.card is None:
         raise ValueError("Card slot was not found.")
+
+    game.reaction_window.attempted_player_ids.append(player_id)
+
     if slot.card.rank != game.reaction_window.target_rank:
         _add_penalty_card(game, player)
         return game

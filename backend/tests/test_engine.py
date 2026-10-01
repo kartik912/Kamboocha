@@ -92,6 +92,52 @@ def test_swap_replaces_slot_and_hides_new_card() -> None:
     assert game.reaction_window.latest_discard.code == original
 
 
+def test_swap_rejects_empty_slot() -> None:
+    game = deal_opening_layout(
+        room_id="room_alpha",
+        player_ids=["p1", "p2"],
+        nicknames=["Asha", "Biren"],
+        seed=12,
+    )
+    confirm_preview_ready(game, player_id="p1")
+    confirm_preview_ready(game, player_id="p2")
+    game.players[0].cards[0].card = None
+
+    draw_turn_card(game, player_id="p1")
+
+    with pytest.raises(ValueError, match="already holds a card"):
+        swap_pending_card(game, player_id="p1", position=0)
+
+
+def test_reaction_blocks_repeated_attempts_from_the_same_player() -> None:
+    game = deal_opening_layout(
+        room_id="room_alpha",
+        player_ids=["p1", "p2"],
+        nicknames=["Asha", "Biren"],
+        seed=13,
+    )
+    confirm_preview_ready(game, player_id="p1")
+    confirm_preview_ready(game, player_id="p2")
+
+    draw_turn_card(game, player_id="p1")
+    discard_pending_card(game, player_id="p1")
+
+    wrong_position = next(
+        slot.position
+        for slot in game.players[1].cards
+        if slot.card is not None and slot.card.rank != game.reaction_window.target_rank
+    )
+    react_to_latest_discard(game, player_id="p2", position=wrong_position)
+
+    assert game.reaction_window is not None
+    remaining_position = next(
+        slot.position for slot in game.players[1].cards if slot.card is not None and slot.position != wrong_position
+    )
+
+    with pytest.raises(ValueError, match="already used your reaction"):
+        react_to_latest_discard(game, player_id="p2", position=remaining_position)
+
+
 def test_draw_reshuffles_discard_pile_when_draw_pile_runs_out() -> None:
     game = deal_opening_layout(
         room_id="room_alpha",
@@ -416,6 +462,78 @@ def test_queen_power_reveals_both_cards_then_swaps_on_second_resolve() -> None:
     assert game.players[1].cards[1].card.code == own_code
     assert game.discard_pile[-1].rank.value == "Q"
     assert game.power_state is None
+
+
+def test_queen_power_can_be_skipped_after_reveal_without_swapping() -> None:
+    game = deal_opening_layout(
+        room_id="room_alpha",
+        player_ids=["p1", "p2"],
+        nicknames=["Asha", "Biren"],
+        seed=24,
+    )
+    confirm_preview_ready(game, player_id="p1")
+    confirm_preview_ready(game, player_id="p2")
+
+    own_code = game.players[0].cards[1].card.code
+    target_code = game.players[1].cards[1].card.code
+    game.pending_drawn_card = build_standard_deck()[11]
+    game.turn_phase = TurnPhase.resolve
+
+    begin_power_action(game, player_id="p1")
+    execute_power_action(game, player_id="p1", self_position=1, target_player_id="p2", target_position=1)
+
+    execute_power_action(game, player_id="p1", skip_swap=True)
+
+    assert game.players[0].cards[1].card.code == own_code
+    assert game.players[1].cards[1].card.code == target_code
+    assert game.discard_pile[-1].rank.value == "Q"
+    assert game.power_state is None
+
+
+def test_queen_power_can_choose_a_different_slot_from_the_revealed_player() -> None:
+    game = deal_opening_layout(
+        room_id="room_alpha",
+        player_ids=["p1", "p2"],
+        nicknames=["Asha", "Biren"],
+        seed=24,
+    )
+    confirm_preview_ready(game, player_id="p1")
+    confirm_preview_ready(game, player_id="p2")
+
+    own_code = game.players[0].cards[0].card.code
+    other_target_code = game.players[1].cards[2].card.code
+    game.pending_drawn_card = build_standard_deck()[11]
+    game.turn_phase = TurnPhase.resolve
+
+    begin_power_action(game, player_id="p1")
+    execute_power_action(game, player_id="p1", self_position=1, target_player_id="p2", target_position=1)
+
+    execute_power_action(game, player_id="p1", self_position=0, target_player_id="p2", target_position=2)
+
+    assert game.players[0].cards[0].card.code == other_target_code
+    assert game.players[1].cards[2].card.code == own_code
+    assert game.power_state is None
+
+
+def test_queen_power_rejects_swap_with_a_different_player_than_revealed() -> None:
+    game = deal_opening_layout(
+        room_id="room_alpha",
+        player_ids=["p1", "p2", "p3"],
+        nicknames=["Asha", "Biren", "Caro"],
+        seed=24,
+    )
+    confirm_preview_ready(game, player_id="p1")
+    confirm_preview_ready(game, player_id="p2")
+    confirm_preview_ready(game, player_id="p3")
+
+    game.pending_drawn_card = build_standard_deck()[11]
+    game.turn_phase = TurnPhase.resolve
+
+    begin_power_action(game, player_id="p1")
+    execute_power_action(game, player_id="p1", self_position=1, target_player_id="p2", target_position=1)
+
+    with pytest.raises(ValueError, match="only swap with the player"):
+        execute_power_action(game, player_id="p1", self_position=1, target_player_id="p3", target_position=1)
 
 
 def test_kamboocha_gives_every_other_player_one_final_turn_and_finishes() -> None:

@@ -162,6 +162,7 @@ class RoomStore:
         self_position: int | None,
         target_player_id: str | None,
         target_position: int | None,
+        skip_swap: bool = False,
     ) -> Room:
         room = self.get_room(room_id=room_id, player_id=player_id)
         if room.game_setup is None:
@@ -172,6 +173,7 @@ class RoomStore:
             self_position=self_position,
             target_player_id=target_player_id,
             target_position=target_position,
+            skip_swap=skip_swap,
         )
         return room
 

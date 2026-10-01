@@ -102,6 +102,7 @@ class ReactionWindow(BaseModel):
     latest_discard: Card
     opened_at: datetime
     expires_at: datetime
+    attempted_player_ids: list[str] = Field(default_factory=list)
 
 
 class PowerState(BaseModel):
