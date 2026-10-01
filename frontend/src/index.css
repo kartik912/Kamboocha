@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,700;0,800;1,700;1,800&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #050a1d;
+  --panel: #091534;
+  --panel-2: #0d1d4e;
+  --line: rgba(95, 167, 255, 0.24);
+  --cyan: #48e0ff;
+  --ice: #eef7ff;
+  --ink: #071129;
+  --danger: #d53c70;
+  --text: #e6f2ff;
+  --muted: rgba(224, 237, 255, 0.72);
+  --display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --sans: 'Barlow', system-ui, sans-serif;
+  --mono: 'DM Mono', ui-monospace, monospace;
+  font: 16px/1.5 var(--sans);
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(52, 114, 255, 0.22), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(72, 224, 255, 0.12), transparent 24%),
+    linear-gradient(180deg, #050a1d 0%, #070f2b 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol {
+  margin: 0;
+}
+
+button {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(72, 224, 255, 0.88);
+  color: #041021;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
