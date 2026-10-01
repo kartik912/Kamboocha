@@ -42,6 +42,7 @@ type GamePlayerSummary = {
 type ReactionSummary = {
   latest_discard_code: string
   seconds_remaining: number
+  already_reacted: boolean
 }
 
 type PowerSummary = {
@@ -394,7 +395,7 @@ function App() {
   const isCurrentTurn = game?.current_player_id === room?.session_player_id
   const reactionWindow = game?.reaction_window ?? null
   const canConfirmOpening = game?.stage === 'preview' && currentGamePlayer?.preview_ready === false
-  const canReact = Boolean(game?.stage === 'active' && reactionWindow && !isCurrentTurn)
+  const canReact = Boolean(game?.stage === 'active' && reactionWindow && !isCurrentTurn && !reactionWindow.already_reacted)
   const powerState = game?.power_state ?? null
   const drawnRank = cardRank(game?.pending_drawn_card_code ?? null)
   const canStartPower = Boolean(
@@ -451,7 +452,11 @@ function App() {
       const nextRoom = (await response.json()) as RoomSummary
       setRoom(nextRoom)
       setRoomMessage(buildRoomMessage(action, nextRoom))
-      if (action === 'power-resolve' || action === 'power-start' || action === 'end-turn' || action === 'call-kamboocha') {
+      if (action === 'power-resolve') {
+        if (!nextRoom.game?.power_state) {
+          setPowerSelection({ selfPosition: null, targetPlayerId: '', targetPosition: null })
+        }
+      } else if (action === 'power-start' || action === 'end-turn' || action === 'call-kamboocha') {
         setPowerSelection({ selfPosition: null, targetPlayerId: '', targetPosition: null })
       }
     } catch (error) {
@@ -585,7 +590,7 @@ function App() {
     )
   }
 
-  async function handleResolvePower() {
+  async function handleResolvePower(skipSwap = false) {
     if (!room || !powerState) {
       return
     }
@@ -597,6 +602,7 @@ function App() {
         self_position: powerSelection.selfPosition,
         target_player_id: powerSelection.targetPlayerId || null,
         target_position: powerSelection.targetPosition,
+        skip_swap: skipSwap,
       },
       'power-resolve',
     )
@@ -872,11 +878,27 @@ function App() {
                     ? 'Memorize your card, then flip it back.'
                     : powerState.action === 'peek_other'
                       ? 'Memorize the opponent card, then continue.'
-                      : 'Memorize both cards, then confirm the swap.'}
+                      : 'Memorize both cards, then choose to swap or keep them.'}
                 </p>
-                <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={handleResolvePower}>
-                  {pendingAction === 'power-resolve' ? 'Saving...' : 'Ready'}
-                </button>
+                {powerState.action === 'insight_swap' ? (
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={pendingAction !== null || powerSelection.selfPosition === null || powerSelection.targetPosition === null}
+                      onClick={() => handleResolvePower(false)}
+                    >
+                      {pendingAction === 'power-resolve' ? 'Swapping...' : 'Swap cards'}
+                    </button>
+                    <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => handleResolvePower(true)}>
+                      {pendingAction === 'power-resolve' ? 'Saving...' : 'Keep cards'}
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={() => handleResolvePower()}>
+                    {pendingAction === 'power-resolve' ? 'Saving...' : 'Ready'}
+                  </button>
+                )}
               </div>
             ) : null}
             {game.stage === 'finished' ? (
@@ -976,7 +998,7 @@ function App() {
                         ? 'Choose your slot and the target slot to swap without looking.'
                         : 'Choose one of your cards and a target card to reveal before swapping.'}
                 </p>
-                <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={handleResolvePower}>
+                <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={() => handleResolvePower()}>
                   {pendingAction === 'power-resolve'
                     ? 'Resolving...'
                     : powerState.action === 'blind_swap'
@@ -993,7 +1015,7 @@ function App() {
                 .map((card) => {
                   const isFaceUp = game.stage === 'finished' || card.known_to_player
                   const visibleCode = isFaceUp ? card.code : null
-                  const canSwap = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'resolve'
+                  const canSwap = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'resolve' && card.has_card
                   const canReactWithCard = canReact && card.has_card
                   const canSelectForPower = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'power'
                   const canSelectSelf =
@@ -1027,11 +1049,7 @@ function App() {
                       <div className="memory-card__actions">
                         {canSwap ? (
                           <button type="button" className="card-action" disabled={pendingAction !== null} onClick={() => handleSwapCard(card.position)}>
-                            {pendingAction === 'swap'
-                              ? 'Swapping...'
-                              : card.has_card
-                                ? 'Swap with drawn card'
-                                : 'Place drawn card here'}
+                            {pendingAction === 'swap' ? 'Swapping...' : 'Swap with drawn card'}
                           </button>
                         ) : null}
                         {canSelectSelf ? (
@@ -1111,7 +1129,7 @@ function App() {
               {reshuffleBannerVisible ? <div className="reshuffle-burst">Discard pile shuffled back into the deck</div> : null}
             </div>
 
-            {powerState && !powerState.awaiting_ready ? (
+            {powerState && (!powerState.awaiting_ready || powerState.action === 'insight_swap') ? (
               <div className="info-box selector-box">
                 <span className="info-label">Power targets</span>
                 <div className="selector-grid">
@@ -1119,6 +1137,7 @@ function App() {
                     Target player
                     <select
                       value={powerSelection.targetPlayerId}
+                      disabled={powerState.awaiting_ready}
                       onChange={(event) => updatePowerSelection('targetPlayerId', event.target.value)}
                     >
                       <option value="">Choose player</option>
@@ -1144,6 +1163,7 @@ function App() {
                     </select>
                   </label>
                 </div>
+                {powerState.awaiting_ready ? <p className="event-copy">Locked to the player whose card you revealed. Pick any of their slots to swap with.</p> : null}
               </div>
             ) : null}
 
