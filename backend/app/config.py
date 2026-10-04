@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_database: str = "kamboocha"
-    allowed_origins: list[str] = ["http://localhost:5173"]
+    allowed_origins: list[str] = ["http://localhost:5173", "https://kamboocha.vercel.app/"]
 
     model_config = SettingsConfigDict(env_prefix="KAMBOOCHA_", env_file=".env")
 
