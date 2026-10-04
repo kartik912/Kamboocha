@@ -128,3 +128,18 @@ The project is now beyond the initial scaffold and into a working prototype, but
 - Improve mobile layout and responsive behavior further for smaller screens.
 - Add richer table animations and polish for card movement, reactions, and endgame presentation.
 - Add stronger API / integration coverage around full match flows.
+
+## TODO
+- add a pop up showing the swapping of cards
+ - like when i swap my card with a drawn card
+ - when i swap my card with someone else's
+ - it will show a small animation type that will show the list of cards of both players and will by animation show that card are beign swapped
+ - 2 type of animation needed
+ - one is swapping my card with the drawn card
+ - swapping my card with someone else's card
+
+- updating the table signal with more live feed about what is happening in the match.
+- update the drawn card with a deck of cards image that will change its size with number of cards it have.
+- when we draw a card, as a current player, that card should shown at the screen as full size and player should get option as discard or swap
+-and if discarded the card will go to the discarded pile
+- if swap is choosen, it will go to table signal showing the card, with each card's below will be shown as swap and when clicked on swap it will show an animation where all cards will be shown on all players screen and which card is swapped will be shown.
