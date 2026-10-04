@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+const apiUrl = (path: string) => `${API_BASE_URL}${path}`
+
 const suitSymbols: Record<string, string> = {
   C: '♣',
   D: '♦',
@@ -236,7 +239,7 @@ function App() {
 
     async function loadHealth() {
       try {
-        const response = await fetch('/api/health', { signal: controller.signal })
+        const response = await fetch(apiUrl('/api/health'), { signal: controller.signal })
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
         }
@@ -274,7 +277,7 @@ function App() {
 
     async function refreshRoom() {
       try {
-        const response = await fetch(`/api/rooms/${roomId}?player_id=${encodeURIComponent(sessionPlayerId)}`)
+        const response = await fetch(apiUrl(`/api/rooms/${roomId}?player_id=${encodeURIComponent(sessionPlayerId)}`))
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
         }
@@ -436,7 +439,7 @@ function App() {
     setRoomError(null)
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(apiUrl(url), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
