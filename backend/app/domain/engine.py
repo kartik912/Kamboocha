@@ -2,7 +2,9 @@ from datetime import UTC, datetime, timedelta
 from random import Random
 from typing import Sequence
 
-from app.domain.models import Card, CardSlot, GameSetup, GameStage, PlayerLayout, PowerAction, PowerState, Rank, ReactionWindow, Suit, TurnPhase
+from app.domain.models import ActivityEvent, Card, CardSlot, GameSetup, GameStage, PlayerLayout, PowerAction, PowerState, Rank, ReactionWindow, Suit, SwapEvent, TurnPhase
+
+SWAP_ANIMATION_DURATION = timedelta(seconds=5)
 
 
 def build_standard_deck() -> list[Card]:
@@ -81,11 +83,13 @@ def confirm_preview_ready(game: GameSetup, player_id: str) -> GameSetup:
 
     if all(item.preview_ready for item in game.players):
         game.stage = GameStage.active
+        _record_activity(game, "game_started", player_id)
     return game
 
 
 def draw_turn_card(game: GameSetup, player_id: str) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is still in the opening preview phase.")
     if game.current_player_id != player_id:
@@ -100,11 +104,13 @@ def draw_turn_card(game: GameSetup, player_id: str) -> GameSetup:
 
     game.pending_drawn_card = game.draw_pile.pop()
     game.turn_phase = TurnPhase.resolve
+    _record_activity(game, "draw", player_id)
     return game
 
 
 def begin_power_action(game: GameSetup, player_id: str) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is still in the opening preview phase.")
     if game.current_player_id != player_id:
@@ -127,6 +133,7 @@ def begin_power_action(game: GameSetup, player_id: str) -> GameSetup:
 
 def discard_pending_card(game: GameSetup, player_id: str) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is still in the opening preview phase.")
     if game.current_player_id != player_id:
@@ -138,11 +145,13 @@ def discard_pending_card(game: GameSetup, player_id: str) -> GameSetup:
     _push_discard_and_open_reaction(game, discarded_card, player_id=player_id)
     game.pending_drawn_card = None
     _enter_post_turn(game)
+    _record_activity(game, "discard", player_id)
     return game
 
 
 def swap_pending_card(game: GameSetup, player_id: str, position: int) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is still in the opening preview phase.")
     if game.current_player_id != player_id:
@@ -163,7 +172,14 @@ def swap_pending_card(game: GameSetup, player_id: str, position: int) -> GameSet
     replaced_card = slot.card
     slot.card = game.pending_drawn_card
     slot.known_to_player = False
-    _push_discard_and_open_reaction(game, replaced_card, player_id=player_id)
+    game.swap_event = SwapEvent(kind="drawn", actor_player_id=player_id, actor_position=position)
+    _record_activity(game, "swap_drawn", player_id, actor_position=position)
+    _push_discard_and_open_reaction(
+        game,
+        replaced_card,
+        player_id=player_id,
+        animation_delay=SWAP_ANIMATION_DURATION,
+    )
     game.pending_drawn_card = None
     _enter_post_turn(game)
     return game
@@ -178,6 +194,7 @@ def execute_power_action(
     skip_swap: bool = False,
 ) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is still in the opening preview phase.")
     if game.turn_phase != TurnPhase.power or game.power_state is None:
@@ -194,6 +211,7 @@ def execute_power_action(
             if slot.card is None:
                 raise ValueError("Card slot was not found.")
             slot.known_to_player = False
+            _record_activity(game, "power_used", player_id)
             _finish_power_discard(game, player_id)
             return game
 
@@ -208,6 +226,7 @@ def execute_power_action(
 
     if action == PowerAction.peek_other:
         if game.power_state.awaiting_ready:
+            _record_activity(game, "power_used", player_id)
             _finish_power_discard(game, player_id)
             return game
 
@@ -238,6 +257,7 @@ def execute_power_action(
             return game
 
         if skip_swap:
+            _record_activity(game, "power_used", player_id)
             _finish_power_discard(game, player_id)
             return game
 
@@ -253,7 +273,22 @@ def execute_power_action(
         own_slot.card, target_slot.card = target_slot.card, own_slot.card
         own_slot.known_to_player = False
         target_slot.known_to_player = False
-        _finish_power_discard(game, player_id)
+        game.swap_event = SwapEvent(
+            kind="player",
+            actor_player_id=player_id,
+            actor_position=self_position,
+            target_player_id=target_player_id,
+            target_position=target_position,
+        )
+        _record_activity(
+            game,
+            "swap_player",
+            player_id,
+            target_player_id=target_player_id,
+            actor_position=self_position,
+            target_position=target_position,
+        )
+        _finish_power_discard(game, player_id, animation_delay=SWAP_ANIMATION_DURATION)
         return game
 
     own_slot = _get_slot(actor, self_position)
@@ -265,12 +300,28 @@ def execute_power_action(
     own_slot.card, target_slot.card = target_slot.card, own_slot.card
     own_slot.known_to_player = False
     target_slot.known_to_player = False
-    _finish_power_discard(game, player_id)
+    game.swap_event = SwapEvent(
+        kind="player",
+        actor_player_id=player_id,
+        actor_position=self_position,
+        target_player_id=target_player_id,
+        target_position=target_position,
+    )
+    _record_activity(
+        game,
+        "swap_player",
+        player_id,
+        target_player_id=target_player_id,
+        actor_position=self_position,
+        target_position=target_position,
+    )
+    _finish_power_discard(game, player_id, animation_delay=SWAP_ANIMATION_DURATION)
     return game
 
 
 def finalize_turn(game: GameSetup, player_id: str, call_kamboocha: bool) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is not active.")
     if game.current_player_id != player_id:
@@ -294,14 +345,21 @@ def finalize_turn(game: GameSetup, player_id: str, call_kamboocha: bool) -> Game
 
     if game.kamboocha_caller_id is not None and not game.final_round_remaining_player_ids:
         _finish_game(game)
+        _record_activity(game, "match_finished", player_id)
         return game
 
+    next_player_id = _next_player_id(game, player_id)
     _advance_turn(game)
+    if call_kamboocha and game.kamboocha_caller_id == player_id:
+        _record_activity(game, "kamboocha", player_id)
+    else:
+        _record_activity(game, "turn_advanced", player_id, target_player_id=next_player_id)
     return game
 
 
 def react_to_latest_discard(game: GameSetup, player_id: str, position: int) -> GameSetup:
     sync_timers(game)
+    _ensure_swap_animation_complete(game)
     if game.stage != GameStage.active:
         raise ValueError("The game is still in the opening preview phase.")
     if game.reaction_window is None:
@@ -323,16 +381,23 @@ def react_to_latest_discard(game: GameSetup, player_id: str, position: int) -> G
 
     if slot.card.rank != game.reaction_window.target_rank:
         _add_penalty_card(game, player)
+        _record_activity(game, "reaction_miss", player_id)
         return game
 
     game.discard_pile.append(slot.card)
     slot.card = None
     slot.known_to_player = False
     game.reaction_window = None
+    _record_activity(game, "reaction_match", player_id)
     return game
 
 
-def _push_discard_and_open_reaction(game: GameSetup, discarded_card: Card, player_id: str) -> GameSetup:
+def _push_discard_and_open_reaction(
+    game: GameSetup,
+    discarded_card: Card,
+    player_id: str,
+    animation_delay: timedelta = timedelta(),
+) -> GameSetup:
     game.discard_pile.append(discarded_card)
     current_time = datetime.now(UTC)
     game.reaction_window = ReactionWindow(
@@ -340,15 +405,24 @@ def _push_discard_and_open_reaction(game: GameSetup, discarded_card: Card, playe
         target_rank=discarded_card.rank,
         latest_discard=discarded_card,
         opened_at=current_time,
-        expires_at=current_time + timedelta(seconds=5),
+        expires_at=current_time + timedelta(seconds=5) + animation_delay,
     )
     return game
 
 
-def _finish_power_discard(game: GameSetup, player_id: str) -> GameSetup:
+def _finish_power_discard(
+    game: GameSetup,
+    player_id: str,
+    animation_delay: timedelta = timedelta(),
+) -> GameSetup:
     if game.power_state is None:
         raise ValueError("There is no power action waiting to be resolved.")
-    _push_discard_and_open_reaction(game, game.power_state.drawn_card, player_id=player_id)
+    _push_discard_and_open_reaction(
+        game,
+        game.power_state.drawn_card,
+        player_id=player_id,
+        animation_delay=animation_delay,
+    )
     game.pending_drawn_card = None
     game.power_state = None
     _enter_post_turn(game)
@@ -407,6 +481,38 @@ def _ensure_draw_cards_available(game: GameSetup, preserve_latest_discard: bool 
 def _enter_post_turn(game: GameSetup) -> GameSetup:
     game.turn_phase = TurnPhase.post_turn
     return game
+
+
+def _ensure_swap_animation_complete(game: GameSetup) -> None:
+    if game.swap_event is None:
+        return
+    animation_ends_at = game.swap_event.created_at + SWAP_ANIMATION_DURATION
+    if datetime.now(UTC) < animation_ends_at:
+        raise ValueError("Wait for the card swap animation to finish.")
+
+
+def _record_activity(
+    game: GameSetup,
+    kind: str,
+    actor_player_id: str | None,
+    target_player_id: str | None = None,
+    actor_position: int | None = None,
+    target_position: int | None = None,
+) -> None:
+    game.activity_event = ActivityEvent(
+        kind=kind,
+        actor_player_id=actor_player_id,
+        target_player_id=target_player_id,
+        actor_position=actor_position,
+        target_position=target_position,
+    )
+
+
+def _next_player_id(game: GameSetup, player_id: str) -> str:
+    if game.final_round_remaining_player_ids:
+        return game.final_round_remaining_player_ids[0]
+    player_index = next(index for index, player in enumerate(game.players) if player.player_id == player_id)
+    return game.players[(player_index + 1) % len(game.players)].player_id
 
 
 def _advance_turn(game: GameSetup) -> GameSetup:

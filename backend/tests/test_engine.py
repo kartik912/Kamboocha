@@ -90,6 +90,41 @@ def test_swap_replaces_slot_and_hides_new_card() -> None:
     assert game.discard_pile[-1].code == original
     assert game.reaction_window is not None
     assert game.reaction_window.latest_discard.code == original
+    assert game.swap_event is not None
+    assert game.swap_event.kind == "drawn"
+    assert game.swap_event.actor_player_id == "p1"
+    assert game.swap_event.actor_position == 0
+    assert game.swap_event.target_player_id is None
+    assert game.swap_event.target_position is None
+    assert game.reaction_window.expires_at - game.reaction_window.opened_at == timedelta(seconds=10)
+
+
+def test_swap_animation_blocks_actions_for_every_player_until_duration_passes() -> None:
+    game = deal_opening_layout(
+        room_id="room_alpha",
+        player_ids=["p1", "p2"],
+        nicknames=["Asha", "Biren"],
+        seed=12,
+    )
+    confirm_preview_ready(game, player_id="p1")
+    confirm_preview_ready(game, player_id="p2")
+    game.pending_drawn_card = build_standard_deck()[0]
+    game.turn_phase = TurnPhase.resolve
+
+    swap_pending_card(game, player_id="p1", position=0)
+
+    wrong_position = next(
+        slot.position
+        for slot in game.players[1].cards
+        if slot.card is not None and slot.card.rank != game.reaction_window.target_rank
+    )
+    with pytest.raises(ValueError, match="Wait for the card swap animation"):
+        react_to_latest_discard(game, player_id="p2", position=wrong_position)
+
+    game.swap_event.created_at -= timedelta(seconds=5, milliseconds=100)
+    react_to_latest_discard(game, player_id="p2", position=wrong_position)
+    assert game.reaction_window is not None
+    assert "p2" in game.reaction_window.attempted_player_ids
 
 
 def test_swap_rejects_empty_slot() -> None:
@@ -431,6 +466,14 @@ def test_jack_power_blind_swaps_cards_and_discards_jack() -> None:
     assert game.players[1].cards[0].card.code == left
     assert game.discard_pile[-1].rank.value == "J"
     assert game.turn_phase == TurnPhase.post_turn
+    assert game.swap_event is not None
+    assert game.swap_event.kind == "player"
+    assert game.swap_event.actor_player_id == "p1"
+    assert game.swap_event.actor_position == 0
+    assert game.swap_event.target_player_id == "p2"
+    assert game.swap_event.target_position == 0
+    assert game.reaction_window is not None
+    assert game.reaction_window.expires_at - game.reaction_window.opened_at == timedelta(seconds=10)
 
 
 def test_queen_power_reveals_both_cards_then_swaps_on_second_resolve() -> None:
@@ -451,6 +494,7 @@ def test_queen_power_reveals_both_cards_then_swaps_on_second_resolve() -> None:
     begin_power_action(game, player_id="p1")
     execute_power_action(game, player_id="p1", self_position=1, target_player_id="p2", target_position=1)
 
+    assert game.swap_event is None
     assert game.power_state is not None
     assert game.power_state.revealed_self_code == own_code
     assert game.power_state.revealed_target_code == target_code
@@ -462,6 +506,14 @@ def test_queen_power_reveals_both_cards_then_swaps_on_second_resolve() -> None:
     assert game.players[1].cards[1].card.code == own_code
     assert game.discard_pile[-1].rank.value == "Q"
     assert game.power_state is None
+    assert game.swap_event is not None
+    assert game.swap_event.kind == "player"
+    assert game.swap_event.actor_player_id == "p1"
+    assert game.swap_event.actor_position == 1
+    assert game.swap_event.target_player_id == "p2"
+    assert game.swap_event.target_position == 1
+    assert game.reaction_window is not None
+    assert game.reaction_window.expires_at - game.reaction_window.opened_at == timedelta(seconds=10)
 
 
 def test_queen_power_can_be_skipped_after_reveal_without_swapping() -> None:
@@ -488,6 +540,7 @@ def test_queen_power_can_be_skipped_after_reveal_without_swapping() -> None:
     assert game.players[1].cards[1].card.code == target_code
     assert game.discard_pile[-1].rank.value == "Q"
     assert game.power_state is None
+    assert game.swap_event is None
 
 
 def test_queen_power_can_choose_a_different_slot_from_the_revealed_player() -> None:

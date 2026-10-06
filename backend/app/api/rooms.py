@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.domain.models import GameStage, PowerAction, TurnPhase
+from app.domain.models import ActivityEvent, GameStage, PowerAction, TurnPhase
 from app.services.rooms import room_store
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
@@ -96,6 +97,42 @@ class PowerSummary(BaseModel):
     selected_target_player_id: str | None
 
 
+class SwapEventSummary(BaseModel):
+    event_id: str
+    kind: str
+    actor_player_id: str
+    actor_nickname: str
+    actor_position: int
+    target_player_id: str | None
+    target_nickname: str | None
+    target_position: int | None
+    created_at: datetime
+
+
+class ActivityEventSummary(BaseModel):
+    event_id: str
+    kind: Literal[
+        "game_started",
+        "draw",
+        "discard",
+        "swap_drawn",
+        "swap_player",
+        "power_used",
+        "reaction_match",
+        "reaction_miss",
+        "kamboocha",
+        "turn_advanced",
+        "match_finished",
+    ]
+    actor_player_id: str | None
+    actor_nickname: str | None
+    target_player_id: str | None
+    target_nickname: str | None
+    actor_position: int | None
+    target_position: int | None
+    created_at: datetime
+
+
 class GameSummary(BaseModel):
     stage: GameStage
     current_player_id: str
@@ -107,6 +144,8 @@ class GameSummary(BaseModel):
     discard_pile_codes: list[str]
     reaction_window: ReactionSummary | None
     power_state: PowerSummary | None
+    swap_event: SwapEventSummary | None
+    activity_event: ActivityEventSummary | None
     kamboocha_caller_id: str | None
     final_round_remaining_player_ids: list[str]
     winner_player_ids: list[str]
@@ -154,6 +193,50 @@ def _room_response(room, session_player_id: str) -> RoomSummary:
                 selected_target_player_id=room.game_setup.power_state.selected_target_player_id,
             )
 
+        swap_event = None
+        latest_swap = room.game_setup.swap_event
+        if latest_swap is not None and current_time - latest_swap.created_at <= timedelta(seconds=8):
+            actor = next((player for player in room.game_setup.players if player.player_id == latest_swap.actor_player_id), None)
+            target = next(
+                (player for player in room.game_setup.players if player.player_id == latest_swap.target_player_id),
+                None,
+            )
+            if actor is not None:
+                swap_event = SwapEventSummary(
+                    event_id=latest_swap.event_id,
+                    kind=latest_swap.kind,
+                    actor_player_id=latest_swap.actor_player_id,
+                    actor_nickname=actor.nickname,
+                    actor_position=latest_swap.actor_position,
+                    target_player_id=latest_swap.target_player_id,
+                    target_nickname=target.nickname if target is not None else None,
+                    target_position=latest_swap.target_position,
+                    created_at=latest_swap.created_at,
+                )
+
+        activity_event = None
+        latest_activity: ActivityEvent | None = room.game_setup.activity_event
+        if latest_activity is not None:
+            actor = next(
+                (player for player in room.game_setup.players if player.player_id == latest_activity.actor_player_id),
+                None,
+            )
+            target = next(
+                (player for player in room.game_setup.players if player.player_id == latest_activity.target_player_id),
+                None,
+            )
+            activity_event = ActivityEventSummary(
+                event_id=latest_activity.event_id,
+                kind=latest_activity.kind,
+                actor_player_id=latest_activity.actor_player_id,
+                actor_nickname=actor.nickname if actor is not None else None,
+                target_player_id=latest_activity.target_player_id,
+                target_nickname=target.nickname if target is not None else None,
+                actor_position=latest_activity.actor_position,
+                target_position=latest_activity.target_position,
+                created_at=latest_activity.created_at,
+            )
+
         game_summary = GameSummary(
             stage=room.game_setup.stage,
             current_player_id=room.game_setup.current_player_id,
@@ -169,6 +252,8 @@ def _room_response(room, session_player_id: str) -> RoomSummary:
             discard_pile_codes=[card.code for card in room.game_setup.discard_pile],
             reaction_window=reaction_window,
             power_state=power_state,
+            swap_event=swap_event,
+            activity_event=activity_event,
             kamboocha_caller_id=room.game_setup.kamboocha_caller_id,
             final_round_remaining_player_ids=room.game_setup.final_round_remaining_player_ids,
             winner_player_ids=room.game_setup.winner_player_ids,

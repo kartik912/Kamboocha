@@ -57,6 +57,41 @@ type PowerSummary = {
   selected_target_player_id: string | null
 }
 
+type SwapEventSummary = {
+  event_id: string
+  kind: 'drawn' | 'player'
+  actor_player_id: string
+  actor_nickname: string
+  actor_position: number
+  target_player_id: string | null
+  target_nickname: string | null
+  target_position: number | null
+  created_at: string
+}
+
+type ActivityEventSummary = {
+  event_id: string
+  kind:
+    | 'game_started'
+    | 'draw'
+    | 'discard'
+    | 'swap_drawn'
+    | 'swap_player'
+    | 'power_used'
+    | 'reaction_match'
+    | 'reaction_miss'
+    | 'kamboocha'
+    | 'turn_advanced'
+    | 'match_finished'
+  actor_player_id: string | null
+  actor_nickname: string | null
+  target_player_id: string | null
+  target_nickname: string | null
+  actor_position: number | null
+  target_position: number | null
+  created_at: string
+}
+
 type GameSummary = {
   stage: 'preview' | 'active' | 'finished'
   current_player_id: string
@@ -68,6 +103,8 @@ type GameSummary = {
   discard_pile_codes: string[]
   reaction_window: ReactionSummary | null
   power_state: PowerSummary | null
+  swap_event: SwapEventSummary | null
+  activity_event: ActivityEventSummary | null
   kamboocha_caller_id: string | null
   final_round_remaining_player_ids: string[]
   winner_player_ids: string[]
@@ -205,12 +242,38 @@ function buildRoomMessage(action: RoomAction, room: RoomSummary): string {
   return 'Ready state updated.'
 }
 
+function formatActivityMessage(event: ActivityEventSummary | null, game: GameSummary): string {
+  if (!event) {
+    return game.stage === 'preview'
+      ? '🧠 Memorize your cards. The table is getting ready.'
+      : game.stage === 'finished'
+        ? '🏁 The match is complete.'
+        : '🎴 Waiting for the next move.'
+  }
+
+  const actor = event.actor_nickname ?? 'A player'
+  if (event.kind === 'game_started') return '🃏 The match is live. Make every card count!'
+  if (event.kind === 'draw') return `🎴 ${actor} drew a card.`
+  if (event.kind === 'discard') return `🗑️ ${actor} discarded a card.`
+  if (event.kind === 'swap_drawn') return `🔄 ${actor} swapped slot ${Number(event.actor_position) + 1} with a drawn card.`
+  if (event.kind === 'swap_player') {
+    return `🔀 ${actor} swapped slot ${Number(event.actor_position) + 1} with ${event.target_nickname ?? 'a player'}'s slot ${Number(event.target_position) + 1}.`
+  }
+  if (event.kind === 'power_used') return `✨ ${actor} used a power. What a move!`
+  if (event.kind === 'reaction_match') return `🔥 ${actor} matched the discard!`
+  if (event.kind === 'reaction_miss') return `😅 ${actor} missed the match and picked up a penalty.`
+  if (event.kind === 'kamboocha') return `📣 ${actor} called Kamboocha! Final round is on.`
+  if (event.kind === 'turn_advanced') return `⏭️ ${actor} passed the turn to ${event.target_nickname ?? 'the next player'}.`
+  return `🏆 Match over! ${game.players.filter((player) => game.winner_player_ids.includes(player.player_id)).map((player) => player.nickname).join(' & ')} won.`
+}
+
 function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>({
     state: 'checking',
     message: 'Checking FastAPI health endpoint...',
   })
   const [room, setRoom] = useState<RoomSummary | null>(null)
+  const [swapAnimation, setSwapAnimation] = useState<SwapEventSummary | null>(null)
   const [landingMode, setLandingMode] = useState<LandingMode>(null)
   const [formState, setFormState] = useState<FormState>({
     nickname: '',
@@ -233,6 +296,30 @@ function App() {
   const previousDrawCountRef = useRef<number | null>(null)
   const previousDiscardTopRef = useRef<string | null>(null)
   const previousReshuffleCountRef = useRef<number | null>(null)
+  const lastSwapEventIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const swapEvent = room?.game?.swap_event
+    if (!swapEvent || lastSwapEventIdRef.current === swapEvent.event_id) {
+      return
+    }
+
+    lastSwapEventIdRef.current = swapEvent.event_id
+    if (Date.now() - Date.parse(swapEvent.created_at) > 8_000) {
+      return
+    }
+
+    setSwapAnimation(swapEvent)
+  }, [room?.game?.swap_event?.event_id])
+
+  useEffect(() => {
+    if (!swapAnimation) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setSwapAnimation(null), 5_000)
+    return () => window.clearTimeout(timeoutId)
+  }, [swapAnimation])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -421,6 +508,14 @@ function App() {
   const roomCodeCharacters = room?.code.split('') ?? []
   const latestDiscardCode = game?.discard_pile_codes.at(-1) ?? null
   const reactionProgress = reactionWindow ? Math.max(0, Math.min(100, (reactionWindow.seconds_remaining / 5) * 100)) : 0
+  const swapParticipants = swapAnimation
+    ? [
+        game?.players.find((player) => player.player_id === swapAnimation.actor_player_id),
+        ...(swapAnimation.kind === 'player' && swapAnimation.target_player_id
+          ? [game?.players.find((player) => player.player_id === swapAnimation.target_player_id)]
+          : []),
+      ].filter((player): player is GamePlayerSummary => player !== undefined)
+    : []
 
   function updateField<K extends keyof FormState>(field: K, value: FormState[K]) {
     setFormState((current) => ({ ...current, [field]: value }))
@@ -628,6 +723,8 @@ function App() {
 
   function handleLeaveRoom() {
     setRoom(null)
+    setSwapAnimation(null)
+    lastSwapEventIdRef.current = null
     setLandingMode(null)
     setRoomError(null)
     setPendingAction(null)
@@ -636,7 +733,8 @@ function App() {
   }
 
   return (
-    <main className="thriller-shell">
+    <>
+    <main className="thriller-shell" inert={swapAnimation !== null}>
       <div className="ambient-orb ambient-orb-left" aria-hidden="true" />
       <div className="ambient-orb ambient-orb-right" aria-hidden="true" />
 
@@ -942,15 +1040,17 @@ function App() {
             <div className="event-panel status-banner immersive-signal">
               <span className="info-label">Table signal</span>
               <strong className="signal-emphasis">
-                {game.stage === 'preview'
-                  ? 'Memorize the opening pattern.'
-                  : reactionWindow
-                    ? 'The table is live. Anyone can strike now.'
-                    : isCurrentTurn
-                      ? 'Your move. Choose with intent.'
-                      : `${currentTurnName} is under pressure.`}
+                {formatActivityMessage(game.activity_event, game)}
               </strong>
-              <p className="event-copy signal-copy">{roomMessage}</p>
+              <p className="event-copy signal-copy">
+                {reactionWindow
+                  ? `⚡ ${reactionWindow.seconds_remaining}s left to match the discard.`
+                  : isCurrentTurn
+                    ? 'Your move is up next.'
+                    : game.stage === 'active'
+                      ? `${currentTurnName} is at the table.`
+                      : 'Stay sharp.'}
+              </p>
             </div>
 
             {game.stage === 'preview' ? (
@@ -1211,6 +1311,77 @@ function App() {
 
       {roomError ? <div className="error-toast">{roomError}</div> : null}
     </main>
+    {swapAnimation ? (
+      <div
+        className={`swap-overlay swap-overlay--${swapAnimation.kind}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Card swap in progress"
+      >
+        <section className="swap-overlay__panel">
+          <p className="micro-copy">Table signal · Card exchange</p>
+          <h2>{swapAnimation.kind === 'drawn' ? 'A card enters the hand' : 'Cards change hands'}</h2>
+          <div className={`swap-motion swap-motion--${swapAnimation.kind}`} aria-hidden="true">
+            <div className="swap-endpoint">
+              <span className="swap-endpoint__name">
+                {swapAnimation.kind === 'drawn' ? 'Draw pile' : swapAnimation.actor_nickname}
+              </span>
+              <span className="swap-endpoint__slot">
+                {swapAnimation.kind === 'drawn' ? 'New card' : `Slot ${swapAnimation.actor_position + 1}`}
+              </span>
+              <span className="swap-motion__card swap-motion__card--first" />
+            </div>
+            <span className="swap-motion__arrow" aria-hidden="true">⇄</span>
+            <div className="swap-endpoint">
+              <span className="swap-endpoint__name">
+                {swapAnimation.kind === 'drawn' ? swapAnimation.actor_nickname : swapAnimation.target_nickname}
+              </span>
+              <span className="swap-endpoint__slot">
+                Slot {swapAnimation.kind === 'drawn' ? swapAnimation.actor_position + 1 : (swapAnimation.target_position ?? 0) + 1}
+              </span>
+              {swapAnimation.kind === 'player' ? (
+                <span className="swap-motion__card swap-motion__card--second" />
+              ) : (
+                <span className="swap-motion__card swap-motion__card--target" />
+              )}
+            </div>
+          </div>
+          <div className="swap-hands" aria-label="Involved players' hidden card slots">
+            {swapParticipants.map((player) => {
+              const selectedPosition = player.player_id === swapAnimation.actor_player_id
+                ? swapAnimation.actor_position
+                : swapAnimation.target_position
+
+              return (
+                <div className="swap-hand" key={player.player_id}>
+                  <div className="swap-hand__heading">
+                    <strong>{player.nickname}</strong>
+                    <span>{player.cards.length} cards</span>
+                  </div>
+                  <div className="swap-hand__cards">
+                    {player.cards
+                      .slice()
+                      .sort((left, right) => left.position - right.position)
+                      .map((card) => (
+                        <div
+                          className={`swap-hand__slot ${card.position === selectedPosition ? 'is-selected' : ''}`}
+                          key={card.position}
+                          aria-label={`Slot ${card.position + 1}${card.position === selectedPosition ? ', swapped' : ''}`}
+                        >
+                          <span className="swap-hand__slot-label">{card.position + 1}</span>
+                          <span className="swap-hand__card-back" aria-hidden="true" />
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="swap-overlay__note">Card identities stay hidden · Play resumes shortly</p>
+        </section>
+      </div>
+    ) : null}
+    </>
   )
 }
 

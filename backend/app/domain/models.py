@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -117,6 +119,38 @@ class PowerState(BaseModel):
     revealed_target_code: str | None = None
 
 
+class SwapEvent(BaseModel):
+    event_id: str = Field(default_factory=lambda: str(uuid4()))
+    kind: Literal["drawn", "player"]
+    actor_player_id: str
+    actor_position: int
+    target_player_id: str | None = None
+    target_position: int | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class ActivityEvent(BaseModel):
+    event_id: str = Field(default_factory=lambda: str(uuid4()))
+    kind: Literal[
+        "game_started",
+        "draw",
+        "discard",
+        "swap_drawn",
+        "swap_player",
+        "power_used",
+        "reaction_match",
+        "reaction_miss",
+        "kamboocha",
+        "turn_advanced",
+        "match_finished",
+    ]
+    actor_player_id: str | None = None
+    target_player_id: str | None = None
+    actor_position: int | None = None
+    target_position: int | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class PlayerLayout(BaseModel):
     player_id: str
     nickname: str
@@ -135,6 +169,8 @@ class GameSetup(BaseModel):
     discard_pile: list[Card] = Field(default_factory=list)
     reshuffle_count: int = 0
     pending_drawn_card: Card | None = None
+    swap_event: SwapEvent | None = None
+    activity_event: ActivityEvent | None = None
     current_player_id: str
     stage: GameStage = GameStage.preview
     turn_phase: TurnPhase = TurnPhase.draw
