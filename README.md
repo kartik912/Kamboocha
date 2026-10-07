@@ -38,6 +38,15 @@ Implemented frontend features include:
 - A finished-game leaderboard that reveals every player's final cards, sorts scores ascending, and highlights tied leaders.
 - Hidden card backs using the provided card-back image asset.
 - Live room and game updates via polling.
+- Draw and discard piles drawn as stacked-card decks whose thickness steps with the number of cards left (empty piles show a dashed slot; the top discard is face-up).
+- The drawn card appears large and face-up below your hand with `Discard it` (and the power button when it applies); swap by choosing a slot.
+- Game rails split by purpose: turn, stage, roster, and notices on the left; draw/discard piles and power targets on the right.
+- UI/accessibility refinements that keep the Persona-style theme:
+  - required markers, hints, and inline validation on the landing forms,
+  - a confirm step for `Call Kamboocha` and for leaving a live match,
+  - power targeting that only offers valid slots and disables the action until the selection is complete,
+  - dismissible error toast, live-region announcements for the table signal, rank badges on the leaderboard,
+  - larger minimum text sizes, visible focus rings, `prefers-reduced-motion` support, and compact side rails on small screens.
 
 ## Backend
 
@@ -89,6 +98,15 @@ Set-Location backend
 
 Current backend test coverage includes room flow, deck rules, reactions, powers, Kamboocha, endgame reveal, and discard-to-draw reshuffling.
 
+Frontend tests use Vitest and Testing Library with a mocked API:
+
+```powershell
+Set-Location frontend
+npm test
+```
+
+Current frontend test coverage includes the draw/discard deck stacks, the drawn-card panel, the left/right rail layout, and the power target slot dropdown.
+
 ## Gameplay notes
 
 - Deck: standard 52-card deck, no jokers.
@@ -139,7 +157,6 @@ The project is now beyond the initial scaffold and into a working prototype, but
  - one is swapping my card with the drawn card
  - swapping my card with someone else's card
 
-- update the drawn card with a deck of cards image that will change its size with number of cards it have.
 - when we draw a card, as a current player, that card should shown at the screen as full size and player should get option as discard or swap
 -and if discarded the card will go to the discarded pile
 - if swap is choosen, it will go to table signal showing the card, with each card's below will be shown as swap and when clicked on swap it will show an animation where all cards will be shown on all players screen and which card is swapped will be shown.

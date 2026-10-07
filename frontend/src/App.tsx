@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import './App.css'
 
 const API_BASE_URL = (import.meta.env.API_BASE_URL ?? '').replace(/\/+$/, '')
@@ -142,6 +142,7 @@ type PowerSelection = {
 }
 
 type LeaderboardPlayer = GamePlayerSummary & {
+  rank: number
   finalScore: number
 }
 
@@ -181,6 +182,41 @@ function cardTone(code: string | null): 'tone-red' | 'tone-black' {
 
 function cardRank(code: string | null): string | null {
   return code ? code.slice(0, -1) : null
+}
+
+function stackLayerCount(count: number): number {
+  if (count <= 0) return 0
+  if (count === 1) return 1
+  if (count <= 5) return 2
+  if (count <= 12) return 3
+  if (count <= 22) return 4
+  if (count <= 35) return 5
+  return 6
+}
+
+function CardStack({ count, variant, faceCode = null }: { count: number; variant: 'draw' | 'discard'; faceCode?: string | null }) {
+  const layers = stackLayerCount(count)
+
+  if (layers === 0) {
+    return (
+      <div className="card-stack card-stack--empty" aria-hidden="true">
+        <span>Empty</span>
+      </div>
+    )
+  }
+
+  const showFace = variant === 'discard' && faceCode !== null
+
+  return (
+    <div className={`card-stack card-stack--${variant}`} style={{ '--stack-layers': layers } as CSSProperties} aria-hidden="true">
+      {Array.from({ length: layers - 1 }, (_, index) => (
+        <span key={index} className="card-stack__layer" style={{ '--layer-index': layers - 1 - index } as CSSProperties} />
+      ))}
+      <span className={`card-stack__top ${showFace ? `is-face-up ${cardTone(faceCode)}` : ''}`}>
+        {showFace ? <strong>{formatCardLabel(faceCode, true)}</strong> : null}
+      </span>
+    </div>
+  )
 }
 
 const CARD_SCORE_BY_RANK: Record<string, number> = {
@@ -343,6 +379,8 @@ function App() {
   const [discardBurstLabel, setDiscardBurstLabel] = useState<string | null>(null)
   const [reshufflePulseTick, setReshufflePulseTick] = useState(0)
   const [reshuffleBannerVisible, setReshuffleBannerVisible] = useState(false)
+  const [confirmingKamboocha, setConfirmingKamboocha] = useState(false)
+  const [touchedFields, setTouchedFields] = useState({ nickname: false, joinCode: false })
   const previousDrawCountRef = useRef<number | null>(null)
   const previousDiscardTopRef = useRef<string | null>(null)
   const previousReshuffleCountRef = useRef<number | null>(null)
@@ -551,6 +589,31 @@ function App() {
       reactionWindow === null,
   )
   const otherPlayers = game?.players.filter((player) => player.player_id !== sessionPlayerId) ?? []
+  const nicknameError = formState.nickname.trim().length < 2 ? 'Enter a nickname of at least 2 characters.' : null
+  const joinCodeError = formState.joinCode.trim().length < 4 ? 'Enter the room code from your host (at least 4 characters).' : null
+  const showNicknameError = touchedFields.nickname && nicknameError !== null
+  const showJoinCodeError = touchedFields.joinCode && joinCodeError !== null
+  const selectedTargetPlayer = otherPlayers.find((player) => player.player_id === powerSelection.targetPlayerId) ?? null
+  const targetSlotOptions = selectedTargetPlayer
+    ? selectedTargetPlayer.cards
+        .filter((card) => card.has_card)
+        .map((card) => card.position)
+        .sort((left, right) => left - right)
+    : []
+  const powerSelectionComplete = !powerState
+    ? false
+    : powerState.action === 'peek_self'
+      ? powerSelection.selfPosition !== null
+      : powerState.action === 'peek_other'
+        ? powerSelection.targetPlayerId !== '' && powerSelection.targetPosition !== null
+        : powerSelection.selfPosition !== null && powerSelection.targetPlayerId !== '' && powerSelection.targetPosition !== null
+
+  useEffect(() => {
+    if (!canFinalizeTurn) {
+      setConfirmingKamboocha(false)
+    }
+  }, [canFinalizeTurn])
+
   const leaderboardPlayers: LeaderboardPlayer[] =
     game?.stage === 'finished'
       ? game.players
@@ -569,6 +632,10 @@ function App() {
 
             return left.nickname.localeCompare(right.nickname)
           })
+          .map((player, _index, sorted) => ({
+            ...player,
+            rank: sorted.findIndex((candidate) => candidate.finalScore === player.finalScore) + 1,
+          }))
       : []
   const lowestLeaderboardScore = leaderboardPlayers[0]?.finalScore ?? null
   const readyCount = room?.players.filter((player) => player.ready).length ?? 0
@@ -789,6 +856,10 @@ function App() {
   }
 
   function handleLeaveRoom() {
+    if (game && game.stage !== 'finished' && !window.confirm('Leave the match? You may not be able to rejoin this game.')) {
+      return
+    }
+
     setRoom(null)
     setSwapAnimation(null)
     lastSwapEventIdRef.current = null
@@ -859,18 +930,30 @@ function App() {
                   <h3>Open a private table</h3>
                 </div>
                 <label>
-                  Nickname
+                  <span className="field-label">
+                    Nickname <span className="required-mark" aria-hidden="true">*</span>
+                  </span>
                   <input
                     value={formState.nickname}
                     onChange={(event) => updateField('nickname', event.target.value)}
+                    onBlur={() => setTouchedFields((current) => ({ ...current, nickname: true }))}
                     minLength={2}
                     maxLength={24}
                     placeholder="Enter your nickname"
+                    autoComplete="nickname"
+                    aria-required="true"
+                    aria-invalid={showNicknameError}
+                    aria-describedby={showNicknameError ? 'nickname-error' : 'nickname-hint'}
                     required
                   />
+                  {showNicknameError ? (
+                    <small className="field-error" id="nickname-error" role="alert">{nicknameError}</small>
+                  ) : (
+                    <small className="field-hint" id="nickname-hint">2–24 characters. Other players will see this name.</small>
+                  )}
                 </label>
                 <label>
-                  Max players
+                  <span className="field-label">Max players</span>
                   <select
                     value={formState.maxPlayers}
                     onChange={(event) => updateField('maxPlayers', event.target.value)}
@@ -898,26 +981,52 @@ function App() {
                   <h3>Step into an existing table</h3>
                 </div>
                 <label>
-                  Nickname
+                  <span className="field-label">
+                    Nickname <span className="required-mark" aria-hidden="true">*</span>
+                  </span>
                   <input
                     value={formState.nickname}
                     onChange={(event) => updateField('nickname', event.target.value)}
+                    onBlur={() => setTouchedFields((current) => ({ ...current, nickname: true }))}
                     minLength={2}
                     maxLength={24}
                     placeholder="Enter your nickname"
+                    autoComplete="nickname"
+                    aria-required="true"
+                    aria-invalid={showNicknameError}
+                    aria-describedby={showNicknameError ? 'nickname-error' : 'nickname-hint'}
                     required
                   />
+                  {showNicknameError ? (
+                    <small className="field-error" id="nickname-error" role="alert">{nicknameError}</small>
+                  ) : (
+                    <small className="field-hint" id="nickname-hint">2–24 characters. Other players will see this name.</small>
+                  )}
                 </label>
                 <label>
-                  Room code
+                  <span className="field-label">
+                    Room code <span className="required-mark" aria-hidden="true">*</span>
+                  </span>
                   <input
                     value={formState.joinCode}
                     onChange={(event) => updateField('joinCode', event.target.value.toUpperCase())}
+                    onBlur={() => setTouchedFields((current) => ({ ...current, joinCode: true }))}
                     minLength={4}
                     maxLength={8}
                     placeholder="ABC123"
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    aria-required="true"
+                    aria-invalid={showJoinCodeError}
+                    aria-describedby={showJoinCodeError ? 'join-code-error' : 'join-code-hint'}
                     required
                   />
+                  {showJoinCodeError ? (
+                    <small className="field-error" id="join-code-error" role="alert">{joinCodeError}</small>
+                  ) : (
+                    <small className="field-hint" id="join-code-hint">4–8 characters, shared by the host.</small>
+                  )}
                 </label>
                 <button type="submit" className="primary-button" disabled={pendingAction !== null}>
                   {pendingAction === 'join' ? 'Joining...' : 'Join room'}
@@ -928,11 +1037,13 @@ function App() {
               </form>
             ) : null}
 
-            <div className="status-panel">
-              <p className="micro-copy">Backend</p>
-              <strong>{apiStatus.state === 'online' ? 'Connected' : 'Waiting'}</strong>
-              <p>{apiStatus.message}</p>
-            </div>
+            {apiStatus.state !== 'online' ? (
+              <div className="status-panel" role="status">
+                <p className="micro-copy">Connection</p>
+                <strong>Waiting for the backend</strong>
+                <p>{apiStatus.message}</p>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -954,7 +1065,7 @@ function App() {
               </div>
             </div>
 
-            <div className="room-code-display" aria-label="Room code">
+            <div className="room-code-display" role="group" aria-label="Room code">
               {roomCodeCharacters.map((character, index) => (
                 <div key={`${character}-${index}`} className="room-code-tile">
                   {character}
@@ -1015,18 +1126,20 @@ function App() {
       {screen === 'game' && room && game ? (
         <section className="game-stage">
           <aside className="side-rail left-rail">
-            <div className="info-box">
-              <span className="info-label">Stage</span>
-              <strong className="info-value">{formatStageLabel(game.stage)}</strong>
-            </div>
             <div className={`info-box turn-box ${isCurrentTurn ? 'is-active' : ''}`}>
               <span className="info-label">Current turn</span>
               <strong className="info-value">{currentTurnName}</strong>
               <small className="turn-whisper">{isCurrentTurn ? 'Act before the table reacts.' : 'Watch for the discard and remember everything.'}</small>
             </div>
-            <div className="info-box">
-              <span className="info-label">Your visible cards</span>
-              <strong className="info-value">{currentGamePlayer?.visible_card_count ?? 0}</strong>
+            <div className="info-pair">
+              <div className="info-box">
+                <span className="info-label">Stage</span>
+                <strong className="info-value">{formatStageLabel(game.stage)}</strong>
+              </div>
+              <div className="info-box">
+                <span className="info-label">Visible</span>
+                <strong className="info-value">{currentGamePlayer?.visible_card_count ?? 0}</strong>
+              </div>
             </div>
             {powerState && powerState.awaiting_ready ? (
               <div className="event-panel memory-panel">
@@ -1084,294 +1197,6 @@ function App() {
                 </div>
               </div>
             ) : null}
-          </aside>
-
-          <section className="table-stage panel-frame">
-            <div className="table-heading">
-              <div>
-                <p className="micro-copy">Live table</p>
-                <h2 className="section-title">{game.stage === 'preview' ? 'Opening memory test' : 'Your hand'}</h2>
-              </div>
-              <div className="table-meta">
-                <span className="room-status-badge subdued">Room {room.code}</span>
-                <span className="room-status-badge">{room.players.length} players</span>
-              </div>
-            </div>
-
-            <div className="event-panel status-banner immersive-signal">
-              <span className="info-label">Table signal</span>
-              <strong className="signal-emphasis">
-                {formatActivityMessage(game.activity_event, game)}
-              </strong>
-              <p className="event-copy signal-copy">
-                {reactionWindow
-                  ? `⚡ ${reactionWindow.seconds_remaining}s left to match the discard.`
-                  : isCurrentTurn
-                    ? 'Your move is up next.'
-                    : game.stage === 'active'
-                      ? `${currentTurnName} is at the table.`
-                      : 'Stay sharp.'}
-              </p>
-            </div>
-
-            {game.stage === 'preview' ? (
-              <div className="event-panel preview-panel">
-                <p className="event-copy">The two cards you saw will turn face down after you confirm.</p>
-                {canConfirmOpening ? (
-                  <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={handleOpeningReady}>
-                    {pendingAction === 'opening-ready' ? 'Saving...' : 'Ready to hide cards'}
-                  </button>
-                ) : (
-                  <p className="muted-copy">You have already confirmed. Waiting for the rest of the table.</p>
-                )}
-              </div>
-            ) : null}
-
-            {game.stage === 'active' && isCurrentTurn && game.turn_phase === 'resolve' ? (
-              <div className="event-panel action-banner">
-                <p>
-                  Drawn card:{' '}
-                  <strong className={cardTone(game.pending_drawn_card_code)}>
-                    {formatCardLabel(game.pending_drawn_card_code, true)}
-                  </strong>
-                </p>
-                <div className="button-row">
-                  <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={handleDiscardCard}>
-                    {pendingAction === 'discard' ? 'Discarding...' : 'Discard drawn card'}
-                  </button>
-                  {canStartPower ? (
-                    <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={handleStartPower}>
-                      {pendingAction === 'power-start' ? 'Preparing...' : `Use ${drawnRank} ability`}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {game.stage === 'active' && isCurrentTurn && game.turn_phase === 'power' && powerState && !powerState.awaiting_ready ? (
-              <div className="event-panel action-banner">
-                <p>
-                  Power active: <strong>{formatPowerLabel(powerState.action)}</strong>
-                </p>
-                <p className="event-copy">
-                  {powerState.action === 'peek_self'
-                    ? 'Select one of your cards to reveal.'
-                    : powerState.action === 'peek_other'
-                      ? 'Choose a player and slot to reveal.'
-                      : powerState.action === 'blind_swap'
-                        ? 'Choose your slot and the target slot to swap without looking.'
-                        : 'Choose one of your cards and a target card to reveal before swapping.'}
-                </p>
-                <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={() => handleResolvePower()}>
-                  {pendingAction === 'power-resolve'
-                    ? 'Resolving...'
-                    : powerState.action === 'blind_swap'
-                      ? 'Resolve swap'
-                      : 'Reveal card'}
-                </button>
-              </div>
-            ) : null}
-
-            {game.stage === 'finished' ? (
-              <div className="leaderboard-panel">
-                <div className="leaderboard-panel__header">
-                  <div>
-                    <p className="micro-copy">Final leaderboard</p>
-                    <h3>Lowest score leads</h3>
-                  </div>
-                  <p className="event-copy">Every player is shown with a face-up final hand and final score.</p>
-                </div>
-
-                <div className="leaderboard-list">
-                  {leaderboardPlayers.map((player) => {
-                    const isLeading = lowestLeaderboardScore !== null && player.finalScore === lowestLeaderboardScore
-
-                    return (
-                      <article key={player.player_id} className={`leaderboard-row ${isLeading ? 'is-leading' : ''}`}>
-                        <div className="leaderboard-row__summary">
-                          <div>
-                            <span className="leaderboard-rank-label">{isLeading ? 'Lead score' : 'Final score'}</span>
-                            <strong className="leaderboard-player-name">
-                              {player.nickname}
-                              {player.player_id === sessionPlayerId ? ' (You)' : ''}
-                            </strong>
-                          </div>
-                          <div className="leaderboard-score-block">
-                            <span className="leaderboard-score-label">Score</span>
-                            <strong className="leaderboard-score-value">{player.finalScore}</strong>
-                          </div>
-                        </div>
-
-                        <div className="leaderboard-cards" aria-label={`${player.nickname} final hand`}>
-                          {player.cards
-                            .slice()
-                            .sort((left, right) => left.position - right.position)
-                            .map((card) => (
-                              <div key={card.position} className={`leaderboard-card ${cardTone(card.code)}`}>
-                                <span className="leaderboard-card__slot">Slot {card.position + 1}</span>
-                                <strong>{formatCardLabel(card.code, card.has_card)}</strong>
-                              </div>
-                            ))}
-                        </div>
-                      </article>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="card-grid">
-                {currentGamePlayer?.cards
-                  .slice()
-                  .sort((left, right) => left.position - right.position)
-                  .map((card) => {
-                    const isFaceUp = game.stage === 'finished' || card.known_to_player
-                    const visibleCode = isFaceUp ? card.code : null
-                    const canSwap = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'resolve' && card.has_card
-                    const canReactWithCard = canReact && card.has_card
-                    const canSelectForPower = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'power'
-                    const canSelectSelf =
-                      canSelectForPower && powerState !== null && ['peek_self', 'blind_swap', 'insight_swap'].includes(powerState.action)
-
-                    return (
-                      <article
-                        key={card.position}
-                        className={`memory-card ${card.has_card ? (isFaceUp ? 'is-face-up' : 'is-hidden') : 'is-empty'} ${cardTone(visibleCode)}`}
-                      >
-                        <div className="memory-card__topline">
-                          <span>Slot {card.position + 1}</span>
-                          {card.has_card ? <small>{isFaceUp ? 'Visible' : 'Hidden'}</small> : <small>Empty</small>}
-                        </div>
-
-                        {card.has_card ? (
-                          <div className={`memory-card__flip ${isFaceUp ? 'is-flipped' : ''}`} aria-label={isFaceUp ? formatCardLabel(visibleCode, true) : 'Hidden card back'}>
-                            <div className="memory-card__flip-inner">
-                              <div className="memory-card__back">
-                                <span className="memory-card__glyph" />
-                              </div>
-                              <div className="memory-card__face">
-                                <strong>{formatCardLabel(visibleCode, true)}</strong>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="memory-card__empty">No card</div>
-                        )}
-
-                        <div className="memory-card__actions">
-                          {canSwap ? (
-                            <button type="button" className="card-action" disabled={pendingAction !== null} onClick={() => handleSwapCard(card.position)}>
-                              {pendingAction === 'swap' ? 'Swapping...' : 'Swap with drawn card'}
-                            </button>
-                          ) : null}
-                          {canSelectSelf ? (
-                            <button
-                              type="button"
-                              className={`card-action ${powerSelection.selfPosition === card.position ? 'is-selected' : ''}`}
-                              disabled={pendingAction !== null}
-                              onClick={() => updatePowerSelection('selfPosition', card.position)}
-                            >
-                              {powerSelection.selfPosition === card.position ? 'Selected' : 'Select for power'}
-                            </button>
-                          ) : null}
-                          {canReactWithCard ? (
-                            <button type="button" className="card-action danger-action" disabled={pendingAction !== null} onClick={() => handleReactToDiscard(card.position)}>
-                              {pendingAction === 'react' ? 'Matching...' : 'Match discard'}
-                            </button>
-                          ) : null}
-                        </div>
-                      </article>
-                    )
-                  })}
-              </div>
-            )}
-
-            {canFinalizeTurn ? (
-              <div className="button-row center-row">
-                <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(false)}>
-                  {pendingAction === 'end-turn' ? 'Ending...' : 'End turn'}
-                </button>
-                {game.kamboocha_caller_id === null ? (
-                  <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(true)}>
-                    {pendingAction === 'call-kamboocha' ? 'Calling...' : 'Call Kamboocha'}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-
-          </section>
-
-          <aside className="side-rail right-rail">
-            {reshuffleBannerVisible ? (
-              <div className="reshuffle-stream" aria-hidden="true">
-                <span className="reshuffle-stream__card reshuffle-stream__card-1" />
-                <span className="reshuffle-stream__card reshuffle-stream__card-2" />
-                <span className="reshuffle-stream__card reshuffle-stream__card-3" />
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className={`info-box action-box draw-box ${game.stage === 'active' && isCurrentTurn && game.turn_phase === 'draw' ? 'is-active' : ''} ${drawPulseTick % 2 === 1 ? 'has-draw-pulse-a' : 'has-draw-pulse-b'} ${reshufflePulseTick % 2 === 1 ? 'has-reshuffle-a' : 'has-reshuffle-b'}`}
-              disabled={!(game.stage === 'active' && isCurrentTurn && game.turn_phase === 'draw') || pendingAction !== null}
-              onClick={handleDrawCard}
-            >
-              <span className="info-label">Draw pile</span>
-              <div className="pile-preview">
-                <span className="mini-card-back" aria-hidden="true" />
-                <strong className="info-value">{game.draw_pile_count}</strong>
-              </div>
-            </button>
-
-            <div className={`info-box stack-box ${discardPulseTick % 2 === 1 ? 'has-discard-pulse-a' : 'has-discard-pulse-b'} ${reshufflePulseTick % 2 === 1 ? 'has-reshuffle-a' : 'has-reshuffle-b'}`}>
-              <span className="info-label">Discard pile</span>
-              <div className="pile-preview discard-preview">
-                {latestDiscardCode ? (
-                  <div className={`discard-chip ${cardTone(latestDiscardCode)}`}>{formatCardLabel(latestDiscardCode, true)}</div>
-                ) : (
-                  <div className="discard-chip empty">None</div>
-                )}
-                <strong className="info-value">{game.discard_pile_count}</strong>
-              </div>
-              {discardBurstLabel ? <div className="discard-burst">{discardBurstLabel} hit the discard</div> : null}
-              {reshuffleBannerVisible ? <div className="reshuffle-burst">Discard pile shuffled back into the deck</div> : null}
-            </div>
-
-            {powerState && (!powerState.awaiting_ready || powerState.action === 'insight_swap') ? (
-              <div className="info-box selector-box">
-                <span className="info-label">Power targets</span>
-                <div className="selector-grid">
-                  <label>
-                    Target player
-                    <select
-                      value={powerSelection.targetPlayerId}
-                      disabled={powerState.awaiting_ready}
-                      onChange={(event) => updatePowerSelection('targetPlayerId', event.target.value)}
-                    >
-                      <option value="">Choose player</option>
-                      {otherPlayers.map((player) => (
-                        <option key={player.player_id} value={player.player_id}>
-                          {player.nickname}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Target slot
-                    <select
-                      value={powerSelection.targetPosition ?? ''}
-                      onChange={(event) => updatePowerSelection('targetPosition', event.target.value === '' ? null : Number(event.target.value))}
-                    >
-                      <option value="">Choose slot</option>
-                      {[0, 1, 2, 3, 4, 5, 6, 7].map((position) => (
-                        <option key={position} value={position}>
-                          Slot {position + 1}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                {powerState.awaiting_ready ? <p className="event-copy">Locked to the player whose card you revealed. Pick any of their slots to swap with.</p> : null}
-              </div>
-            ) : null}
 
             <div className="info-box roster-box">
               <span className="info-label">Table</span>
@@ -1409,10 +1234,336 @@ function App() {
               </div>
             ) : null}
           </aside>
+
+          <section className="table-stage panel-frame">
+            <div className="table-heading">
+              <div>
+                <p className="micro-copy">Live table</p>
+                <h2 className="section-title">{game.stage === 'preview' ? 'Opening memory test' : 'Your hand'}</h2>
+              </div>
+              <div className="table-meta">
+                <span className="room-status-badge subdued">Room {room.code}</span>
+                <span className="room-status-badge">{room.players.length} players</span>
+              </div>
+            </div>
+
+            <div className="event-panel status-banner immersive-signal" role="status">
+              <span className="info-label">Table signal</span>
+              <strong className="signal-emphasis">
+                {formatActivityMessage(game.activity_event, game)}
+              </strong>
+              <p className="event-copy signal-copy">
+                {reactionWindow
+                  ? `⚡ ${reactionWindow.seconds_remaining}s left to match the discard.`
+                  : isCurrentTurn
+                    ? 'Your move is up next.'
+                    : game.stage === 'active'
+                      ? `${currentTurnName} is at the table.`
+                      : 'Stay sharp.'}
+              </p>
+            </div>
+
+            {game.stage === 'preview' ? (
+              <div className="event-panel preview-panel">
+                <p className="event-copy">The two cards you saw will turn face down after you confirm.</p>
+                {canConfirmOpening ? (
+                  <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={handleOpeningReady}>
+                    {pendingAction === 'opening-ready' ? 'Saving...' : 'Ready to hide cards'}
+                  </button>
+                ) : (
+                  <p className="muted-copy">You have already confirmed. Waiting for the rest of the table.</p>
+                )}
+              </div>
+            ) : null}
+
+            {game.stage === 'active' && isCurrentTurn && game.turn_phase === 'power' && powerState && !powerState.awaiting_ready ? (
+              <div className="event-panel action-banner">
+                <p>
+                  Power active: <strong>{formatPowerLabel(powerState.action)}</strong>
+                </p>
+                <p className="event-copy">
+                  {powerState.action === 'peek_self'
+                    ? 'Select one of your cards to reveal.'
+                    : powerState.action === 'peek_other'
+                      ? 'Choose a player and slot to reveal.'
+                      : powerState.action === 'blind_swap'
+                        ? 'Choose your slot and the target slot to swap without looking.'
+                        : 'Choose one of your cards and a target card to reveal before swapping.'}
+                </p>
+                <button type="button" className="primary-button" disabled={pendingAction !== null || !powerSelectionComplete} onClick={() => handleResolvePower()}>
+                  {pendingAction === 'power-resolve'
+                    ? 'Resolving...'
+                    : powerState.action === 'blind_swap'
+                      ? 'Resolve swap'
+                      : 'Reveal card'}
+                </button>
+              </div>
+            ) : null}
+
+            {game.stage === 'finished' ? (
+              <div className="leaderboard-panel">
+                <div className="leaderboard-panel__header">
+                  <div>
+                    <p className="micro-copy">Final leaderboard</p>
+                    <h3>Lowest score leads</h3>
+                  </div>
+                  <p className="event-copy">Every player is shown with a face-up final hand and final score.</p>
+                </div>
+
+                <ol className="leaderboard-list">
+                  {leaderboardPlayers.map((player) => {
+                    const isLeading = lowestLeaderboardScore !== null && player.finalScore === lowestLeaderboardScore
+
+                    return (
+                      <li key={player.player_id} className={`leaderboard-row ${isLeading ? 'is-leading' : ''}`}>
+                        <div className="leaderboard-row__summary">
+                          <span className="leaderboard-rank" aria-label={`Rank ${player.rank}`}>
+                            #{player.rank}
+                          </span>
+                          <div className="leaderboard-identity">
+                            <span className="leaderboard-rank-label">{isLeading ? 'Top score' : 'Final score'}</span>
+                            <strong className="leaderboard-player-name">
+                              {player.nickname}
+                              {player.player_id === sessionPlayerId ? ' (You)' : ''}
+                            </strong>
+                          </div>
+                          <div className="leaderboard-score-block">
+                            <span className="leaderboard-score-label">Score</span>
+                            <strong className="leaderboard-score-value">{player.finalScore}</strong>
+                          </div>
+                        </div>
+
+                        <div className="leaderboard-cards" aria-label={`${player.nickname} final hand`}>
+                          {player.cards
+                            .slice()
+                            .sort((left, right) => left.position - right.position)
+                            .map((card) => (
+                              <div key={card.position} className={`leaderboard-card ${cardTone(card.code)}`}>
+                                <span className="leaderboard-card__slot">Slot {card.position + 1}</span>
+                                <strong>{formatCardLabel(card.code, card.has_card)}</strong>
+                              </div>
+                            ))}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ol>
+              </div>
+            ) : (
+              <div className="card-grid">
+                {currentGamePlayer?.cards
+                  .slice()
+                  .sort((left, right) => left.position - right.position)
+                  .map((card) => {
+                    const isFaceUp = game.stage === 'finished' || card.known_to_player
+                    const visibleCode = isFaceUp ? card.code : null
+                    const canSwap = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'resolve' && card.has_card
+                    const canReactWithCard = canReact && card.has_card
+                    const canSelectForPower = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'power'
+                    const canSelectSelf =
+                      canSelectForPower && powerState !== null && ['peek_self', 'blind_swap', 'insight_swap'].includes(powerState.action)
+
+                    return (
+                      <article
+                        key={card.position}
+                        className={`memory-card ${card.has_card ? (isFaceUp ? 'is-face-up' : 'is-hidden') : 'is-empty'} ${cardTone(visibleCode)}`}
+                      >
+                        <div className="memory-card__topline">
+                          <span>Slot {card.position + 1}</span>
+                          {card.has_card ? <small>{isFaceUp ? 'Visible' : 'Hidden'}</small> : <small>Empty</small>}
+                        </div>
+
+                        {card.has_card ? (
+                          <div className={`memory-card__flip ${isFaceUp ? 'is-flipped' : ''}`} role="img" aria-label={isFaceUp ? formatCardLabel(visibleCode, true) : 'Hidden card back'}>
+                            <div className="memory-card__flip-inner">
+                              <div className="memory-card__back">
+                                <span className="memory-card__glyph" />
+                              </div>
+                              <div className="memory-card__face">
+                                <strong>{formatCardLabel(visibleCode, true)}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="memory-card__empty">No card</div>
+                        )}
+
+                        <div className="memory-card__actions">
+                          {canSwap ? (
+                            <button type="button" className="card-action" disabled={pendingAction !== null} onClick={() => handleSwapCard(card.position)}>
+                              {pendingAction === 'swap' ? 'Swapping...' : 'Swap with drawn card'}
+                            </button>
+                          ) : null}
+                          {canSelectSelf ? (
+                            <button
+                              type="button"
+                              className={`card-action ${powerSelection.selfPosition === card.position ? 'is-selected' : ''}`}
+                              aria-pressed={powerSelection.selfPosition === card.position}
+                              disabled={pendingAction !== null}
+                              onClick={() => updatePowerSelection('selfPosition', card.position)}
+                            >
+                              {powerSelection.selfPosition === card.position ? 'Selected' : 'Select for power'}
+                            </button>
+                          ) : null}
+                          {canReactWithCard ? (
+                            <button type="button" className="card-action danger-action" disabled={pendingAction !== null} onClick={() => handleReactToDiscard(card.position)}>
+                              {pendingAction === 'react' ? 'Matching...' : 'Match discard'}
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    )
+                  })}
+              </div>
+            )}
+
+            {game.stage === 'active' && isCurrentTurn && game.turn_phase === 'resolve' && game.pending_drawn_card_code ? (
+              <div className="held-card-panel">
+                <div
+                  className={`held-card ${cardTone(game.pending_drawn_card_code)}`}
+                  role="img"
+                  aria-label={`Drawn card ${formatCardLabel(game.pending_drawn_card_code, true)}`}
+                >
+                  <strong>{formatCardLabel(game.pending_drawn_card_code, true)}</strong>
+                </div>
+                <div className="held-card-panel__body">
+                  <span className="info-label">Drawn card</span>
+                  <p className="event-copy">Pick a slot above to swap it in, or discard it.</p>
+                  <div className="button-row">
+                    <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={handleDiscardCard}>
+                      {pendingAction === 'discard' ? 'Discarding...' : 'Discard it'}
+                    </button>
+                    {canStartPower ? (
+                      <button type="button" className="primary-button" disabled={pendingAction !== null} onClick={handleStartPower}>
+                        {pendingAction === 'power-start' ? 'Preparing...' : `Use ${drawnRank} ability`}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {canFinalizeTurn ? (
+              <div className="finalize-controls">
+                <div className="button-row center-row">
+                  <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(false)}>
+                    {pendingAction === 'end-turn' ? 'Ending...' : 'End turn'}
+                  </button>
+                  {game.kamboocha_caller_id === null ? (
+                    confirmingKamboocha || pendingAction === 'call-kamboocha' ? (
+                      <>
+                        <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(true)}>
+                          {pendingAction === 'call-kamboocha' ? 'Calling...' : 'Confirm Kamboocha'}
+                        </button>
+                        <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(false)}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(true)}>
+                        Call Kamboocha
+                      </button>
+                    )
+                  ) : null}
+                </div>
+                {confirmingKamboocha ? (
+                  <p className="event-copy" role="status">
+                    Calling Kamboocha gives every other player one final turn. This cannot be undone.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+          </section>
+
+          <aside className="side-rail right-rail">
+            {reshuffleBannerVisible ? (
+              <div className="reshuffle-stream" aria-hidden="true">
+                <span className="reshuffle-stream__card reshuffle-stream__card-1" />
+                <span className="reshuffle-stream__card reshuffle-stream__card-2" />
+                <span className="reshuffle-stream__card reshuffle-stream__card-3" />
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className={`info-box action-box draw-box pile-box ${game.stage === 'active' && isCurrentTurn && game.turn_phase === 'draw' ? 'is-active' : ''} ${drawPulseTick % 2 === 1 ? 'has-draw-pulse-a' : 'has-draw-pulse-b'} ${reshufflePulseTick % 2 === 1 ? 'has-reshuffle-a' : 'has-reshuffle-b'}`}
+              disabled={!(game.stage === 'active' && isCurrentTurn && game.turn_phase === 'draw') || pendingAction !== null}
+              onClick={handleDrawCard}
+            >
+              <span className="info-label">Draw pile</span>
+              <div className="pile-preview">
+                <CardStack variant="draw" count={game.draw_pile_count} />
+                <strong className="info-value">
+                  {game.draw_pile_count} <small>{game.draw_pile_count === 1 ? 'card' : 'cards'}</small>
+                </strong>
+              </div>
+            </button>
+
+            <div className={`info-box stack-box pile-box ${discardPulseTick % 2 === 1 ? 'has-discard-pulse-a' : 'has-discard-pulse-b'} ${reshufflePulseTick % 2 === 1 ? 'has-reshuffle-a' : 'has-reshuffle-b'}`}>
+              <span className="info-label">Discard pile</span>
+              <div className="pile-preview discard-preview">
+                <CardStack variant="discard" count={game.discard_pile_count} faceCode={latestDiscardCode} />
+                <strong className="info-value">
+                  {game.discard_pile_count} <small>{game.discard_pile_count === 1 ? 'card' : 'cards'}</small>
+                </strong>
+              </div>
+              {discardBurstLabel ? <div className="discard-burst">{discardBurstLabel} hit the discard</div> : null}
+              {reshuffleBannerVisible ? <div className="reshuffle-burst">Discard pile shuffled back into the deck</div> : null}
+            </div>
+
+            {powerState && (!powerState.awaiting_ready || powerState.action === 'insight_swap') ? (
+              <div className="info-box selector-box">
+                <span className="info-label">Power targets</span>
+                <div className="selector-grid">
+                  <label>
+                    Target player
+                    <select
+                      value={powerSelection.targetPlayerId}
+                      disabled={powerState.awaiting_ready}
+                      onChange={(event) => {
+                        updatePowerSelection('targetPlayerId', event.target.value)
+                        updatePowerSelection('targetPosition', null)
+                      }}
+                    >
+                      <option value="">Choose player</option>
+                      {otherPlayers.map((player) => (
+                        <option key={player.player_id} value={player.player_id}>
+                          {player.nickname}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Target slot
+                    <select
+                      value={powerSelection.targetPosition ?? ''}
+                      disabled={selectedTargetPlayer === null}
+                      onChange={(event) => updatePowerSelection('targetPosition', event.target.value === '' ? null : Number(event.target.value))}
+                    >
+                      <option value="">{selectedTargetPlayer === null ? 'Choose a player first' : 'Choose slot'}</option>
+                      {targetSlotOptions.map((position) => (
+                        <option key={position} value={position}>
+                          Slot {position + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {powerState.awaiting_ready ? <p className="event-copy">Locked to the player whose card you revealed. Pick any of their slots to swap with.</p> : null}
+              </div>
+            ) : null}
+          </aside>
         </section>
       ) : null}
 
-      {roomError ? <div className="error-toast">{roomError}</div> : null}
+      {roomError ? (
+        <div className="error-toast" role="alert">
+          <span>{roomError}</span>
+          <button type="button" className="error-toast__dismiss" aria-label="Dismiss message" onClick={() => setRoomError(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
     </main>
     {swapAnimation ? (
       <div
