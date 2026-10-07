@@ -12,7 +12,7 @@ description: 'Maintain the Kamboocha table signal as a concise, entertaining dis
 - Keep it quick to scan and entertaining, using a short phrase with an appropriate emoji.
 - Identify who acted and what public action occurred. For swaps, identify the player(s) and swapped slot position(s) when available.
 - Never reveal card face, rank, suit, drawn-card identity, private peek values, or other concealed card knowledge in the activity event or its rendered text. For a discard, report only that a card was discarded. For a power, report only that a power was used, not its rank or card.
-- Cover public gameplay activity: turn/draw, discard, all successful swaps, power use, reaction outcomes, Kamboocha call/final-round transition, turn passed, and match result. No historical feed, event queue, or archival storage is in scope.
+- Cover public gameplay activity: turn/draw, discard, all successful swaps, power use and safe power phases, reaction outcomes, Kamboocha call/final-round transition, turn passed, and match result. No historical feed, event queue, or archival storage is in scope.
 
 ## Architecture and Ownership
 
@@ -24,10 +24,10 @@ description: 'Maintain the Kamboocha table signal as a concise, entertaining dis
 
 ## Implementation Procedure
 
-1. Define a typed `ActivityEvent` in `backend/app/domain/models.py` with a UUID event id, event kind, actor id, optional target id, optional slot positions or safe outcome metadata, and UTC creation time. Explicitly exclude card objects, card codes, ranks, suits, peek results, and raw arbitrary message text.
+1. Define a typed `ActivityEvent` in `backend/app/domain/models.py` with a UUID event id, event kind, actor id, optional target id, optional slot positions, explicit safe power metadata, and UTC creation time. Explicitly exclude card objects, card codes, ranks, suits, peek results, and raw arbitrary message text.
 2. Add one nullable `activity_event` field to `GameSetup`. Replace it on each public gameplay event; never append to a history list.
 3. Record events at the authoritative successful mutation points in `backend/app/domain/engine.py` and room transitions in `backend/app/services/rooms.py` as needed. Distinguish a draw from its subsequent discard/swap; emit a power-used event when the power is actually consumed, not on private reveal/setup. For swap actions, keep existing swap-event metadata compatible and ensure it contains no identities.
-4. Cover public reaction outcomes, Kamboocha/final-round call, turn advance, and game finish. Avoid emitting duplicate competing events for one atomic action; pick one concise event that best communicates the outcome.
+4. Cover public reaction outcomes, Kamboocha/final-round call, power start/select/decide/resolve, turn advance, and game finish. Avoid emitting duplicate competing events for one atomic action; pick one concise event that best communicates the outcome.
 5. Serialize only safe event fields via a response model in `backend/app/api/rooms.py`, resolving player display names server-side. Return the same latest event to each room member. Do not put card values in event fields, messages, logs, or tests.
 6. Extend frontend TypeScript types. Render one emoji-led, concise signal derived from the event kind and safe metadata. Do not let `buildRoomMessage` or local action responses overwrite a newer shared activity event; keep room/lobby notices separate from the live-game signal or use event-id-aware precedence.
 7. Ensure the latest item is shown on clients that poll after mutation. Since only latest state is retained, do not add replay history; a joining/reloading player may see the current fresh event but older events are intentionally unavailable. Optionally age out the display as a presentation detail, but never build history.
@@ -38,7 +38,7 @@ description: 'Maintain the Kamboocha table signal as a concise, entertaining dis
 - The Table signal updates for everyone when a public gameplay action occurs, including clients receiving the new room state through polling.
 - At any moment, the UI displays only one latest activity item; a later event replaces it and no history list is stored or rendered.
 - Messages are brief, clear, entertaining, and use an appropriate emoji.
-- Draw, discard, swap, power, reaction, Kamboocha/final-round, turn-advance, and match-result events are meaningfully distinguished.
+- Draw, discard, swap, power-start, power-select, power-decide, power-resolve, Kamboocha/final-round, turn-advance, and match-result events are meaningfully distinguished.
 - Swap messages identify who swapped and relevant slot positions where available. Draw/discard/power messages disclose no card identity.
 - Card rank, suit, code, private peek result, and hidden-card contents are never revealed by the new activity contract.
 - Existing gameplay behavior and the shared swap animation continue to work.

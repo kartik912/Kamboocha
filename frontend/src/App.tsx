@@ -77,7 +77,10 @@ type ActivityEventSummary = {
     | 'discard'
     | 'swap_drawn'
     | 'swap_player'
-    | 'power_used'
+    | 'power_started'
+    | 'power_selecting'
+    | 'power_deciding'
+    | 'power_resolved'
     | 'reaction_match'
     | 'reaction_miss'
     | 'kamboocha'
@@ -89,6 +92,8 @@ type ActivityEventSummary = {
   target_nickname: string | null
   actor_position: number | null
   target_position: number | null
+  power_action: PowerSummary['action'] | null
+  power_stage: 'started' | 'selecting' | 'deciding' | 'resolved' | null
   created_at: string
 }
 
@@ -136,6 +141,10 @@ type PowerSelection = {
   targetPosition: number | null
 }
 
+type LeaderboardPlayer = GamePlayerSummary & {
+  finalScore: number
+}
+
 type RoomAction =
   | 'create'
   | 'join'
@@ -172,6 +181,31 @@ function cardTone(code: string | null): 'tone-red' | 'tone-black' {
 
 function cardRank(code: string | null): string | null {
   return code ? code.slice(0, -1) : null
+}
+
+const CARD_SCORE_BY_RANK: Record<string, number> = {
+  A: 0,
+  '2': 2,
+  '3': 3,
+  '4': 4,
+  '5': 5,
+  '6': 6,
+  '7': 7,
+  '8': 8,
+  '9': 9,
+  '10': 10,
+  J: 11,
+  Q: 12,
+  K: -1,
+}
+
+function scoreCard(code: string | null): number {
+  const rank = cardRank(code)
+  if (!rank) {
+    return 0
+  }
+
+  return CARD_SCORE_BY_RANK[rank] ?? 0
 }
 
 function formatStageLabel(stage: GameSummary['stage']): string {
@@ -257,9 +291,25 @@ function formatActivityMessage(event: ActivityEventSummary | null, game: GameSum
   if (event.kind === 'discard') return `🗑️ ${actor} discarded a card.`
   if (event.kind === 'swap_drawn') return `🔄 ${actor} swapped slot ${Number(event.actor_position) + 1} with a drawn card.`
   if (event.kind === 'swap_player') {
+    if (event.power_action) {
+      return `🔀 ${actor} used ${formatPowerLabel(event.power_action)} to swap slot ${Number(event.actor_position) + 1} with ${event.target_nickname ?? 'a player'}'s slot ${Number(event.target_position) + 1}.`
+    }
+
     return `🔀 ${actor} swapped slot ${Number(event.actor_position) + 1} with ${event.target_nickname ?? 'a player'}'s slot ${Number(event.target_position) + 1}.`
   }
-  if (event.kind === 'power_used') return `✨ ${actor} used a power. What a move!`
+  if (event.kind === 'power_started') {
+    return event.power_action ? `✨ ${actor} is using ${formatPowerLabel(event.power_action)} ability.` : `✨ ${actor} is using a power ability.`
+  }
+  if (event.kind === 'power_selecting') {
+    if (event.power_action === 'blind_swap') return `🔀 ${actor} is choosing cards to swap.`
+    return `🔎 ${actor} is choosing which card to see.`
+  }
+  if (event.kind === 'power_deciding') return `🤔 ${actor} is deciding whether to swap the cards.`
+  if (event.kind === 'power_resolved') {
+    if (event.power_action === 'blind_swap') return `🔀 ${actor} finished a Jack swap.`
+    if (event.power_action === 'insight_swap') return `🃏 ${actor} resolved a Queen ability.`
+    return `✨ ${actor} finished the power play.`
+  }
   if (event.kind === 'reaction_match') return `🔥 ${actor} matched the discard!`
   if (event.kind === 'reaction_miss') return `😅 ${actor} missed the match and picked up a penalty.`
   if (event.kind === 'kamboocha') return `📣 ${actor} called Kamboocha! Final round is on.`
@@ -501,9 +551,26 @@ function App() {
       reactionWindow === null,
   )
   const otherPlayers = game?.players.filter((player) => player.player_id !== sessionPlayerId) ?? []
-  const winnerNames = game?.winner_player_ids.map(
-    (winnerId) => game.players.find((player) => player.player_id === winnerId)?.nickname ?? winnerId,
-  ) ?? []
+  const leaderboardPlayers: LeaderboardPlayer[] =
+    game?.stage === 'finished'
+      ? game.players
+          .map((player) => ({
+            ...player,
+            finalScore: player.cards.reduce((total, card) => total + scoreCard(card.code), 0),
+          }))
+          .sort((left, right) => {
+            if (left.finalScore !== right.finalScore) {
+              return left.finalScore - right.finalScore
+            }
+
+            if (left.seat_index !== right.seat_index) {
+              return left.seat_index - right.seat_index
+            }
+
+            return left.nickname.localeCompare(right.nickname)
+          })
+      : []
+  const lowestLeaderboardScore = leaderboardPlayers[0]?.finalScore ?? null
   const readyCount = room?.players.filter((player) => player.ready).length ?? 0
   const roomCodeCharacters = room?.code.split('') ?? []
   const latestDiscardCode = game?.discard_pile_codes.at(-1) ?? null
@@ -1002,12 +1069,6 @@ function App() {
                 )}
               </div>
             ) : null}
-            {game.stage === 'finished' ? (
-              <div className="event-panel winner-panel">
-                <span className="info-label">Winner</span>
-                <strong className="winner-line">{winnerNames.join(', ')}</strong>
-              </div>
-            ) : null}
             {reactionWindow ? (
               <div className="event-panel reaction-panel">
                 <span className="info-label">Reaction window</span>
@@ -1111,70 +1172,118 @@ function App() {
               </div>
             ) : null}
 
-            <div className="card-grid">
-              {currentGamePlayer?.cards
-                .slice()
-                .sort((left, right) => left.position - right.position)
-                .map((card) => {
-                  const isFaceUp = game.stage === 'finished' || card.known_to_player
-                  const visibleCode = isFaceUp ? card.code : null
-                  const canSwap = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'resolve' && card.has_card
-                  const canReactWithCard = canReact && card.has_card
-                  const canSelectForPower = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'power'
-                  const canSelectSelf =
-                    canSelectForPower && powerState !== null && ['peek_self', 'blind_swap', 'insight_swap'].includes(powerState.action)
+            {game.stage === 'finished' ? (
+              <div className="leaderboard-panel">
+                <div className="leaderboard-panel__header">
+                  <div>
+                    <p className="micro-copy">Final leaderboard</p>
+                    <h3>Lowest score leads</h3>
+                  </div>
+                  <p className="event-copy">Every player is shown with a face-up final hand and final score.</p>
+                </div>
 
-                  return (
-                    <article
-                      key={card.position}
-                      className={`memory-card ${card.has_card ? (isFaceUp ? 'is-face-up' : 'is-hidden') : 'is-empty'} ${cardTone(visibleCode)}`}
-                    >
-                      <div className="memory-card__topline">
-                        <span>Slot {card.position + 1}</span>
-                        {card.has_card ? <small>{isFaceUp ? 'Visible' : 'Hidden'}</small> : <small>Empty</small>}
-                      </div>
+                <div className="leaderboard-list">
+                  {leaderboardPlayers.map((player) => {
+                    const isLeading = lowestLeaderboardScore !== null && player.finalScore === lowestLeaderboardScore
 
-                      {card.has_card ? (
-                        <div className={`memory-card__flip ${isFaceUp ? 'is-flipped' : ''}`} aria-label={isFaceUp ? formatCardLabel(visibleCode, true) : 'Hidden card back'}>
-                          <div className="memory-card__flip-inner">
-                            <div className="memory-card__back">
-                              <span className="memory-card__glyph" />
-                            </div>
-                            <div className="memory-card__face">
-                              <strong>{formatCardLabel(visibleCode, true)}</strong>
-                            </div>
+                    return (
+                      <article key={player.player_id} className={`leaderboard-row ${isLeading ? 'is-leading' : ''}`}>
+                        <div className="leaderboard-row__summary">
+                          <div>
+                            <span className="leaderboard-rank-label">{isLeading ? 'Lead score' : 'Final score'}</span>
+                            <strong className="leaderboard-player-name">
+                              {player.nickname}
+                              {player.player_id === sessionPlayerId ? ' (You)' : ''}
+                            </strong>
+                          </div>
+                          <div className="leaderboard-score-block">
+                            <span className="leaderboard-score-label">Score</span>
+                            <strong className="leaderboard-score-value">{player.finalScore}</strong>
                           </div>
                         </div>
-                      ) : (
-                        <div className="memory-card__empty">No card</div>
-                      )}
 
-                      <div className="memory-card__actions">
-                        {canSwap ? (
-                          <button type="button" className="card-action" disabled={pendingAction !== null} onClick={() => handleSwapCard(card.position)}>
-                            {pendingAction === 'swap' ? 'Swapping...' : 'Swap with drawn card'}
-                          </button>
-                        ) : null}
-                        {canSelectSelf ? (
-                          <button
-                            type="button"
-                            className={`card-action ${powerSelection.selfPosition === card.position ? 'is-selected' : ''}`}
-                            disabled={pendingAction !== null}
-                            onClick={() => updatePowerSelection('selfPosition', card.position)}
-                          >
-                            {powerSelection.selfPosition === card.position ? 'Selected' : 'Select for power'}
-                          </button>
-                        ) : null}
-                        {canReactWithCard ? (
-                          <button type="button" className="card-action danger-action" disabled={pendingAction !== null} onClick={() => handleReactToDiscard(card.position)}>
-                            {pendingAction === 'react' ? 'Matching...' : 'Match discard'}
-                          </button>
-                        ) : null}
-                      </div>
-                    </article>
-                  )
-                })}
-            </div>
+                        <div className="leaderboard-cards" aria-label={`${player.nickname} final hand`}>
+                          {player.cards
+                            .slice()
+                            .sort((left, right) => left.position - right.position)
+                            .map((card) => (
+                              <div key={card.position} className={`leaderboard-card ${cardTone(card.code)}`}>
+                                <span className="leaderboard-card__slot">Slot {card.position + 1}</span>
+                                <strong>{formatCardLabel(card.code, card.has_card)}</strong>
+                              </div>
+                            ))}
+                        </div>
+                      </article>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="card-grid">
+                {currentGamePlayer?.cards
+                  .slice()
+                  .sort((left, right) => left.position - right.position)
+                  .map((card) => {
+                    const isFaceUp = game.stage === 'finished' || card.known_to_player
+                    const visibleCode = isFaceUp ? card.code : null
+                    const canSwap = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'resolve' && card.has_card
+                    const canReactWithCard = canReact && card.has_card
+                    const canSelectForPower = isCurrentTurn && game.stage === 'active' && game.turn_phase === 'power'
+                    const canSelectSelf =
+                      canSelectForPower && powerState !== null && ['peek_self', 'blind_swap', 'insight_swap'].includes(powerState.action)
+
+                    return (
+                      <article
+                        key={card.position}
+                        className={`memory-card ${card.has_card ? (isFaceUp ? 'is-face-up' : 'is-hidden') : 'is-empty'} ${cardTone(visibleCode)}`}
+                      >
+                        <div className="memory-card__topline">
+                          <span>Slot {card.position + 1}</span>
+                          {card.has_card ? <small>{isFaceUp ? 'Visible' : 'Hidden'}</small> : <small>Empty</small>}
+                        </div>
+
+                        {card.has_card ? (
+                          <div className={`memory-card__flip ${isFaceUp ? 'is-flipped' : ''}`} aria-label={isFaceUp ? formatCardLabel(visibleCode, true) : 'Hidden card back'}>
+                            <div className="memory-card__flip-inner">
+                              <div className="memory-card__back">
+                                <span className="memory-card__glyph" />
+                              </div>
+                              <div className="memory-card__face">
+                                <strong>{formatCardLabel(visibleCode, true)}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="memory-card__empty">No card</div>
+                        )}
+
+                        <div className="memory-card__actions">
+                          {canSwap ? (
+                            <button type="button" className="card-action" disabled={pendingAction !== null} onClick={() => handleSwapCard(card.position)}>
+                              {pendingAction === 'swap' ? 'Swapping...' : 'Swap with drawn card'}
+                            </button>
+                          ) : null}
+                          {canSelectSelf ? (
+                            <button
+                              type="button"
+                              className={`card-action ${powerSelection.selfPosition === card.position ? 'is-selected' : ''}`}
+                              disabled={pendingAction !== null}
+                              onClick={() => updatePowerSelection('selfPosition', card.position)}
+                            >
+                              {powerSelection.selfPosition === card.position ? 'Selected' : 'Select for power'}
+                            </button>
+                          ) : null}
+                          {canReactWithCard ? (
+                            <button type="button" className="card-action danger-action" disabled={pendingAction !== null} onClick={() => handleReactToDiscard(card.position)}>
+                              {pendingAction === 'react' ? 'Matching...' : 'Match discard'}
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    )
+                  })}
+              </div>
+            )}
 
             {canFinalizeTurn ? (
               <div className="button-row center-row">
@@ -1189,12 +1298,6 @@ function App() {
               </div>
             ) : null}
 
-            {game.stage === 'finished' ? (
-              <div className="showdown-panel">
-                <h3>Final reveal</h3>
-                <p>{winnerNames.length > 1 ? `Winners: ${winnerNames.join(', ')}` : `${winnerNames[0]} wins the round.`}</p>
-              </div>
-            ) : null}
           </section>
 
           <aside className="side-rail right-rail">

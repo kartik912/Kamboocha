@@ -1,6 +1,6 @@
 # Kamboocha
 
-Kamboocha is a multiplayer memory-and-bluff card game web app built with a React + TypeScript frontend and a FastAPI backend. The current version is a playable private-room prototype with a server-authoritative rules engine, live room polling, animated game UI, and end-to-end gameplay from lobby to winner reveal.
+Kamboocha is a multiplayer memory-and-bluff card game web app built with a React + TypeScript frontend and a FastAPI backend. The current version is a playable private-room prototype with a server-authoritative rules engine, live room polling, animated game UI, and end-to-end gameplay from lobby to finished-game leaderboard.
 
 ## Current status
 
@@ -17,7 +17,7 @@ The project now includes a working multiplayer flow for 2 to 10 players:
   - `J` blind swap.
   - `Q` reveal both cards, confirm, then swap.
 - Kamboocha call and final-round flow.
-- Finished-game reveal where all cards flip face up and winner(s) are shown.
+- Finished-game leaderboard where all cards flip face up, every player's final score is shown, rows are sorted by lowest score first, and tied leaders are highlighted.
 - Draw-pile refill by reshuffling only real discarded cards back into the deck when needed.
 
 ## Frontend
@@ -31,10 +31,11 @@ Implemented frontend features include:
 - A thriller-styled live game table with:
   - your cards centered,
   - compact side information rails,
-  - animated table signal and turn emphasis,
+  - animated table signal and turn emphasis, including safe narration for power-card phases,
   - animated card flips,
   - discard / draw pile motion,
   - discard-to-draw reshuffle animation.
+- A finished-game leaderboard that reveals every player's final cards, sorts scores ascending, and highlights tied leaders.
 - Hidden card backs using the provided card-back image asset.
 - Live room and game updates via polling.
 
@@ -50,7 +51,7 @@ Implemented backend features include:
 - Opening preview confirmation flow.
 - Draw, discard, swap, reaction, power, and finalize-turn endpoints.
 - Kamboocha final-round resolution.
-- Endgame winner calculation and full-card reveal serialization.
+- Endgame final-score handling and full-card reveal serialization.
 - Draw-pile reshuffle from discard pile without introducing duplicate cards.
 
 ## Project structure
@@ -138,7 +139,6 @@ The project is now beyond the initial scaffold and into a working prototype, but
  - one is swapping my card with the drawn card
  - swapping my card with someone else's card
 
-- updating the table signal with more live feed about what is happening in the match.
 - update the drawn card with a deck of cards image that will change its size with number of cards it have.
 - when we draw a card, as a current player, that card should shown at the screen as full size and player should get option as discard or swap
 -and if discarded the card will go to the discarded pile

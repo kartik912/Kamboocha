@@ -137,7 +137,10 @@ class ActivityEvent(BaseModel):
         "discard",
         "swap_drawn",
         "swap_player",
-        "power_used",
+        "power_started",
+        "power_selecting",
+        "power_deciding",
+        "power_resolved",
         "reaction_match",
         "reaction_miss",
         "kamboocha",
@@ -148,6 +151,8 @@ class ActivityEvent(BaseModel):
     target_player_id: str | None = None
     actor_position: int | None = None
     target_position: int | None = None
+    power_action: PowerAction | None = None
+    power_stage: Literal["started", "selecting", "deciding", "resolved"] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

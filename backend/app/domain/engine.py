@@ -128,6 +128,7 @@ def begin_power_action(game: GameSetup, player_id: str) -> GameSetup:
     }[game.pending_drawn_card.rank]
     game.power_state = PowerState(actor_player_id=player_id, action=action, drawn_card=game.pending_drawn_card)
     game.turn_phase = TurnPhase.power
+    _record_activity(game, "power_started", player_id, power_action=action, power_stage="started")
     return game
 
 
@@ -211,7 +212,7 @@ def execute_power_action(
             if slot.card is None:
                 raise ValueError("Card slot was not found.")
             slot.known_to_player = False
-            _record_activity(game, "power_used", player_id)
+            _record_activity(game, "power_resolved", player_id, power_action=action, power_stage="resolved")
             _finish_power_discard(game, player_id)
             return game
 
@@ -222,11 +223,12 @@ def execute_power_action(
         game.power_state.selected_self_position = self_position
         game.power_state.revealed_self_code = slot.card.code
         game.power_state.awaiting_ready = True
+        _record_activity(game, "power_selecting", player_id, power_action=action, power_stage="selecting")
         return game
 
     if action == PowerAction.peek_other:
         if game.power_state.awaiting_ready:
-            _record_activity(game, "power_used", player_id)
+            _record_activity(game, "power_resolved", player_id, power_action=action, power_stage="resolved")
             _finish_power_discard(game, player_id)
             return game
 
@@ -238,6 +240,7 @@ def execute_power_action(
         game.power_state.selected_target_position = target_position
         game.power_state.revealed_target_code = slot.card.code
         game.power_state.awaiting_ready = True
+        _record_activity(game, "power_selecting", player_id, power_action=action, power_stage="selecting")
         return game
 
     if action == PowerAction.insight_swap:
@@ -254,10 +257,11 @@ def execute_power_action(
             game.power_state.revealed_self_code = own_slot.card.code
             game.power_state.revealed_target_code = target_slot.card.code
             game.power_state.awaiting_ready = True
+            _record_activity(game, "power_deciding", player_id, power_action=action, power_stage="deciding")
             return game
 
         if skip_swap:
-            _record_activity(game, "power_used", player_id)
+            _record_activity(game, "power_resolved", player_id, power_action=action, power_stage="resolved")
             _finish_power_discard(game, player_id)
             return game
 
@@ -287,6 +291,8 @@ def execute_power_action(
             target_player_id=target_player_id,
             actor_position=self_position,
             target_position=target_position,
+            power_action=action,
+            power_stage="resolved",
         )
         _finish_power_discard(game, player_id, animation_delay=SWAP_ANIMATION_DURATION)
         return game
@@ -314,6 +320,8 @@ def execute_power_action(
         target_player_id=target_player_id,
         actor_position=self_position,
         target_position=target_position,
+        power_action=action,
+        power_stage="resolved",
     )
     _finish_power_discard(game, player_id, animation_delay=SWAP_ANIMATION_DURATION)
     return game
@@ -498,6 +506,8 @@ def _record_activity(
     target_player_id: str | None = None,
     actor_position: int | None = None,
     target_position: int | None = None,
+    power_action: PowerAction | None = None,
+    power_stage: str | None = None,
 ) -> None:
     game.activity_event = ActivityEvent(
         kind=kind,
@@ -505,6 +515,8 @@ def _record_activity(
         target_player_id=target_player_id,
         actor_position=actor_position,
         target_position=target_position,
+        power_action=power_action,
+        power_stage=power_stage,
     )
 
 

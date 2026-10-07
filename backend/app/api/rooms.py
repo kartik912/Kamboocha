@@ -117,7 +117,10 @@ class ActivityEventSummary(BaseModel):
         "discard",
         "swap_drawn",
         "swap_player",
-        "power_used",
+        "power_started",
+        "power_selecting",
+        "power_deciding",
+        "power_resolved",
         "reaction_match",
         "reaction_miss",
         "kamboocha",
@@ -130,6 +133,8 @@ class ActivityEventSummary(BaseModel):
     target_nickname: str | None
     actor_position: int | None
     target_position: int | None
+    power_action: PowerAction | None
+    power_stage: str | None
     created_at: datetime
 
 
@@ -234,6 +239,8 @@ def _room_response(room, session_player_id: str) -> RoomSummary:
                 target_nickname=target.nickname if target is not None else None,
                 actor_position=latest_activity.actor_position,
                 target_position=latest_activity.target_position,
+                power_action=latest_activity.power_action,
+                power_stage=latest_activity.power_stage,
                 created_at=latest_activity.created_at,
             )
 
