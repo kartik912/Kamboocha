@@ -162,6 +162,22 @@ type RoomAction =
 
 type LandingMode = 'create' | 'join' | null
 
+const CARD_VALUE_SEQUENCE = [
+  { rank: 'A', value: 0 },
+  { rank: '2', value: 2 },
+  { rank: '3', value: 3 },
+  { rank: '4', value: 4 },
+  { rank: '5', value: 5 },
+  { rank: '6', value: 6 },
+  { rank: '7', value: 7 },
+  { rank: '8', value: 8 },
+  { rank: '9', value: 9 },
+  { rank: '10', value: 10 },
+  { rank: 'J', value: 11 },
+  { rank: 'Q', value: 12 },
+  { rank: 'K', value: -1 },
+] as const
+
 function formatCardLabel(code: string | null, hasCard: boolean): string {
   if (!hasCard) {
     return 'Empty'
@@ -374,6 +390,7 @@ function App() {
   const [roomMessage, setRoomMessage] = useState('Choose whether to create a private room or join an existing one.')
   const [roomError, setRoomError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<RoomAction | null>(null)
+  const [showRulesDialog, setShowRulesDialog] = useState(false)
   const [drawPulseTick, setDrawPulseTick] = useState(0)
   const [discardPulseTick, setDiscardPulseTick] = useState(0)
   const [discardBurstLabel, setDiscardBurstLabel] = useState<string | null>(null)
@@ -539,6 +556,21 @@ function App() {
   }, [room?.game])
 
   useEffect(() => {
+    if (!showRulesDialog) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowRulesDialog(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showRulesDialog])
+
+  useEffect(() => {
     if (!discardBurstLabel) {
       return
     }
@@ -613,6 +645,27 @@ function App() {
       setConfirmingKamboocha(false)
     }
   }, [canFinalizeTurn])
+
+  useEffect(() => {
+    if (
+      !room ||
+      !game ||
+      !isCurrentTurn ||
+      game.stage !== 'active' ||
+      game.turn_phase !== 'post_turn' ||
+      reactionWindow !== null ||
+      confirmingKamboocha ||
+      pendingAction !== null
+    ) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void handleFinalizeTurn(false)
+    }, 350)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [room, game, isCurrentTurn, reactionWindow, confirmingKamboocha, pendingAction])
 
   const leaderboardPlayers: LeaderboardPlayer[] =
     game?.stage === 'finished'
@@ -884,6 +937,9 @@ function App() {
           </h1>
         </div>
         <div className="header-actions">
+          <button type="button" className="help-button" aria-label="Open game rules" onClick={() => setShowRulesDialog(true)}>
+            ?
+          </button>
           {screen === 'landing' ? (
             <span className={`signal-pill signal-${apiStatus.state}`}>{apiStatus.state === 'online' ? 'Signal locked' : 'Awaiting signal'}</span>
           ) : (
@@ -1443,28 +1499,23 @@ function App() {
               </div>
             ) : null}
 
-            {canFinalizeTurn ? (
+            {canFinalizeTurn && game.kamboocha_caller_id === null ? (
               <div className="finalize-controls">
                 <div className="button-row center-row">
-                  <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(false)}>
-                    {pendingAction === 'end-turn' ? 'Ending...' : 'End turn'}
-                  </button>
-                  {game.kamboocha_caller_id === null ? (
-                    confirmingKamboocha || pendingAction === 'call-kamboocha' ? (
-                      <>
-                        <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(true)}>
-                          {pendingAction === 'call-kamboocha' ? 'Calling...' : 'Confirm Kamboocha'}
-                        </button>
-                        <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(false)}>
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(true)}>
-                        Call Kamboocha
+                  {confirmingKamboocha || pendingAction === 'call-kamboocha' ? (
+                    <>
+                      <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(true)}>
+                        {pendingAction === 'call-kamboocha' ? 'Calling...' : 'Confirm Kamboocha'}
                       </button>
-                    )
-                  ) : null}
+                      <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(false)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(true)}>
+                      Call Kamboocha
+                    </button>
+                  )}
                 </div>
                 {confirmingKamboocha ? (
                   <p className="event-copy" role="status">
@@ -1565,6 +1616,53 @@ function App() {
         </div>
       ) : null}
     </main>
+    {showRulesDialog ? (
+      <div className="rules-dialog-backdrop" onClick={() => setShowRulesDialog(false)}>
+        <div className="rules-dialog" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title" onClick={(event) => event.stopPropagation()}>
+          <button type="button" className="rules-dialog__close" aria-label="Close rules dialog" onClick={() => setShowRulesDialog(false)}>
+            ×
+          </button>
+
+          <h2 id="rules-dialog-title">How to play Kamboocha</h2>
+
+          <div className="rules-dialog__grid">
+            <section className="rules-dialog__section">
+              <h3>Basic rules</h3>
+              <ul>
+                <li>Each player starts with four hidden cards.</li>
+                <li>At the opening peek, you see two cards briefly, then they are hidden again.</li>
+                <li>On your turn, draw a card, then either discard it, swap it into a slot, or use a power if the drawn card is a power card.</li>
+                <li>After a discard or a swap, the table gets a short reaction window to match the discarded rank.</li>
+                <li>The goal is to finish with the lowest score. Aces are 0, kings are -1.</li>
+              </ul>
+            </section>
+
+            <section className="rules-dialog__section">
+              <h3>Power cards</h3>
+              <ul>
+                <li><strong>7</strong> — Seven: peek at one of your own cards.</li>
+                <li><strong>8</strong> — Eight: peek at another player’s card.</li>
+                <li><strong>J</strong> — Jack: blind swap with a target slot.</li>
+                <li><strong>Q</strong> — Queen: reveal a target card and decide whether to swap.</li>
+              </ul>
+            </section>
+          </div>
+
+          <section className="rules-dialog__section rules-dialog__section--wide">
+            <h3>Card values in order</h3>
+            <ul className="rules-dialog__values">
+              {CARD_VALUE_SEQUENCE.map(({ rank, value }) => (
+                <li key={rank}>
+                  <span className="rules-dialog__rank">{rank}</span>
+                  <span className="rules-dialog__value">{value}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </div>
+    ) : null}
+
     {swapAnimation ? (
       <div
         className={`swap-overlay swap-overlay--${swapAnimation.kind}`}

@@ -307,6 +307,15 @@ describe('drawn card panel', () => {
     expect(container.querySelector('.held-card-panel')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Discard it' })).not.toBeInTheDocument()
   })
+
+  it('auto-advances a completed turn and removes the manual end-turn action', async () => {
+    const nextRoom = makeRoom({ current_player_id: OTHER, turn_phase: 'draw', reaction_window: null })
+    await renderGame(makeRoom({ current_player_id: ME, turn_phase: 'post_turn', reaction_window: null }), nextRoom)
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.url === `/api/rooms/${ROOM_ID}/finalize`)).toBe(true))
+    expect(screen.queryByRole('button', { name: 'End turn' })).not.toBeInTheDocument()
+    expect(calls.find((call) => call.url.endsWith('/finalize'))?.body).toEqual({ player_id: ME, call_kamboocha: false })
+  })
 })
 
 describe('side rail layout', () => {
