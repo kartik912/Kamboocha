@@ -139,6 +139,7 @@ class ActivityEventSummary(BaseModel):
 
 
 class GameSummary(BaseModel):
+    game_id: str
     stage: GameStage
     current_player_id: str
     draw_pile_count: int
@@ -245,6 +246,7 @@ def _room_response(room, session_player_id: str) -> RoomSummary:
             )
 
         game_summary = GameSummary(
+            game_id=room.game_setup.game_id,
             stage=room.game_setup.stage,
             current_player_id=room.game_setup.current_player_id,
             draw_pile_count=room.game_setup.draw_pile_count,
@@ -376,6 +378,19 @@ async def start_game(room_id: str, payload: StartGameRequest) -> RoomSummary:
         room = room_store.start_game(room_id=room_id, host_id=payload.player_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _room_response(room, session_player_id=payload.player_id)
+
+
+@router.post("/{room_id}/restart", response_model=RoomSummary)
+async def restart_game(room_id: str, payload: TurnActionRequest) -> RoomSummary:
+    try:
+        room = room_store.restart_game(room_id=room_id, player_id=payload.player_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return _room_response(room, session_player_id=payload.player_id)

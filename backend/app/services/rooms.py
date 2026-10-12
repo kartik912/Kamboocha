@@ -134,6 +134,23 @@ class RoomStore:
         room.status = "peeking" if room.game_setup.stage.value == "preview" else "in_game"
         return room
 
+    def restart_game(self, room_id: str, player_id: str) -> Room:
+        room = self._rooms_by_id.get(room_id)
+        if room is None:
+            raise KeyError("Room not found.")
+        if room.host_id != player_id:
+            raise PermissionError("Only the host can restart the game.")
+        if room.game_setup is None:
+            raise ValueError("Game has not started yet.")
+
+        room.game_setup = deal_opening_layout(
+            room_id=room.room_id,
+            player_ids=[player.player_id for player in room.players],
+            nicknames=[player.nickname for player in room.players],
+        )
+        room.status = "peeking"
+        return room
+
     def draw_card(self, room_id: str, player_id: str) -> Room:
         room = self.get_room(room_id=room_id, player_id=player_id)
         if room.game_setup is None:

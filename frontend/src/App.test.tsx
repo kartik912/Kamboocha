@@ -51,6 +51,7 @@ function makeRoom(gameOverrides: Json = {}, players = [makePlayer(ME, 'Alice', 0
       joined_at: '2026-01-01T00:00:00Z',
     })),
     game: {
+      game_id: 'game-1',
       stage: 'active',
       current_player_id: ME,
       draw_pile_count: 44,

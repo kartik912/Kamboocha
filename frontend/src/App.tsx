@@ -98,6 +98,7 @@ type ActivityEventSummary = {
 }
 
 type GameSummary = {
+  game_id: string
   stage: 'preview' | 'active' | 'finished'
   current_player_id: string
   draw_pile_count: number
@@ -151,6 +152,7 @@ type RoomAction =
   | 'join'
   | 'ready'
   | 'opening-ready'
+  | 'restart'
   | 'draw'
   | 'discard'
   | 'swap'
@@ -404,6 +406,22 @@ function App() {
   const lastSwapEventIdRef = useRef<string | null>(null)
 
   useEffect(() => {
+    setPowerSelection({ selfPosition: null, targetPlayerId: '', targetPosition: null })
+    setSwapAnimation(null)
+    lastSwapEventIdRef.current = null
+    setConfirmingKamboocha(false)
+    previousDrawCountRef.current = null
+    previousDiscardTopRef.current = null
+    previousReshuffleCountRef.current = null
+    setDrawPulseTick(0)
+    setDiscardPulseTick(0)
+    setReshufflePulseTick(0)
+    setDiscardBurstLabel(null)
+    setReshuffleBannerVisible(false)
+    setRoomError(null)
+  }, [room?.game?.game_id])
+
+  useEffect(() => {
     const swapEvent = room?.game?.swap_event
     if (!swapEvent || lastSwapEventIdRef.current === swapEvent.event_id) {
       return
@@ -490,7 +508,7 @@ function App() {
             return current
           }
 
-          if (current.status !== nextRoom.status || current.game?.stage !== nextRoom.game?.stage) {
+          if (current.status !== nextRoom.status || current.game?.stage !== nextRoom.game?.stage || current.game?.game_id !== nextRoom.game?.game_id) {
             setRoomMessage(buildRoomMessage('ready', nextRoom))
           }
           return nextRoom
@@ -908,6 +926,17 @@ function App() {
     )
   }
 
+  async function handleRestartGame() {
+    if (!room || !game || room.host_id !== room.session_player_id || pendingAction !== null) {
+      return
+    }
+    if (!window.confirm('Restart the game? All current progress will be lost. The same players will receive a fresh deal from a newly shuffled deck.')) {
+      return
+    }
+
+    await requestRoom(`/api/rooms/${room.room_id}/restart`, { player_id: room.session_player_id }, 'restart')
+  }
+
   function handleLeaveRoom() {
     if (game && game.stage !== 'finished' && !window.confirm('Leave the match? You may not be able to rejoin this game.')) {
       return
@@ -925,11 +954,11 @@ function App() {
 
   return (
     <>
-    <main className="thriller-shell" inert={swapAnimation !== null}>
+    <main className="thriller-shell">
       <div className="ambient-orb ambient-orb-left" aria-hidden="true" />
       <div className="ambient-orb ambient-orb-right" aria-hidden="true" />
 
-      <header className="app-header">
+      <header className={`app-header${swapAnimation ? ' app-header--swapping' : ''}`}>
         <div>
           <p className="micro-copy">Memory game</p>
           <h1 className="brand-wordmark">
@@ -943,13 +972,21 @@ function App() {
           {screen === 'landing' ? (
             <span className={`signal-pill signal-${apiStatus.state}`}>{apiStatus.state === 'online' ? 'Signal locked' : 'Awaiting signal'}</span>
           ) : (
-            <button type="button" className="ghost-link" onClick={handleLeaveRoom}>
-              Leave room
-            </button>
+            <>
+              {game && room?.host_id === room?.session_player_id ? (
+                <button type="button" className="ghost-link" disabled={pendingAction !== null} onClick={() => void handleRestartGame()}>
+                  {pendingAction === 'restart' ? 'Restarting...' : 'Restart game'}
+                </button>
+              ) : null}
+              <button type="button" className="ghost-link" disabled={pendingAction !== null} onClick={handleLeaveRoom}>
+                Leave room
+              </button>
+            </>
           )}
         </div>
       </header>
 
+      <div inert={swapAnimation !== null}>
       {screen === 'landing' ? (
         <section className="landing-stage">
           <div className="card-fan" aria-hidden="true">
@@ -1615,6 +1652,7 @@ function App() {
           </button>
         </div>
       ) : null}
+      </div>
     </main>
     {showRulesDialog ? (
       <div className="rules-dialog-backdrop" onClick={() => setShowRulesDialog(false)}>
@@ -1667,7 +1705,7 @@ function App() {
       <div
         className={`swap-overlay swap-overlay--${swapAnimation.kind}`}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-label="Card swap in progress"
       >
         <section className="swap-overlay__panel">

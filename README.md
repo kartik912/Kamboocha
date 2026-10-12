@@ -19,6 +19,7 @@ The project now includes a working multiplayer flow for 2 to 10 players:
 - Kamboocha call and final-round flow.
 - Finished-game leaderboard where all cards flip face up, every player's final score is shown, rows are sorted by lowest score first, and tied leaders are highlighted.
 - Draw-pile refill by reshuffling only real discarded cards back into the deck when needed.
+- Host-only game restart with a fresh deal in the same room, available during opening preview, active play (including swap animation), and after the game finishes.
 
 ## Frontend
 
@@ -38,6 +39,8 @@ Implemented frontend features include:
 - A finished-game leaderboard that reveals every player's final cards, sorts scores ascending, and highlights tied leaders.
 - Hidden card backs using the provided card-back image asset.
 - Live room and game updates via polling.
+- Host-only `Restart game` beside `Leave room` once a game exists, with one native OK/Cancel confirmation: Cancel sends no request; OK requests a fresh deal. Room controls remain accessible during swap playback while gameplay stays locked.
+- A changed `game_id` clears local power selections, swap playback, pending Kamboocha confirmation, deck animation state, and stale errors; other clients discover the restart through polling.
 - Draw and discard piles drawn as stacked-card decks whose thickness steps with the number of cards left (empty piles show a dashed slot; the top discard is face-up).
 - The drawn card appears large and face-up below your hand with `Discard it` (and the power button when it applies); swap by choosing a slot.
 - Game rails split by purpose: turn, stage, roster, and notices on the left; draw/discard piles and power targets on the right.
@@ -62,6 +65,7 @@ Implemented backend features include:
 - Kamboocha final-round resolution.
 - Endgame final-score handling and full-card reveal serialization.
 - Draw-pile reshuffle from discard pile without introducing duplicate cards.
+- Server-enforced host-only restart through `RoomStore.restart_game`, replacing the entire game state while preserving the room and roster. Each fresh game has a UUID `game_id`, exposed in `GameSummary`.
 
 ## Project structure
 
@@ -107,6 +111,8 @@ npm test
 
 Current frontend test coverage includes the draw/discard deck stacks, the drawn-card panel, the left/right rail layout, and the power target slot dropdown.
 
+Host-restart implementation validation: `npm run test -- src/App.test.tsx` passed all 45 existing frontend tests, `npm run build` passed, and editor diagnostics reported no errors. With explicit user approval to use the root `.venv` instead of the missing `backend/.venv`, `../.venv/Scripts/Activate.ps1` was activated from `backend/` and `VIRTUAL_ENV` verified; `python -m pytest tests/test_engine.py tests/test_api.py` passed all 28 tests with one upstream Starlette/httpx deprecation warning. Backend uvicorn runs at `http://127.0.0.1:8000` and the frontend at `http://127.0.0.1:5173`. A disposable live two-player API smoke check through the frontend proxy passed: health; guest restart rejected with 403 without changing the game ID; host restart during drawn-card resolution preserving room ID/code, host, and roster while creating a new game ID and returning to preview/peeking; 44 draw cards and an empty discard; cleared drawn-card, power, reaction, swap, activity, and winner state; four cards, no penalties, and preview Ready false for each player; repeated preview restart producing another new game ID; guest fetch observing the latest game ID, with only the guest's own two opening cards visible and all host cards hidden. This was a runtime smoke check, not new automated regression coverage or verification of every restart phase or the UI warning. No new regression cases were added; manual user acceptance remains pending. The user's approval covered the environment substitution only, not feature acceptance.
+
 ## Gameplay notes
 
 - Deck: standard 52-card deck, no jokers.
@@ -120,6 +126,9 @@ Current frontend test coverage includes the draw/discard deck stacks, the drawn-
 - Matching discarded cards is based on rank, not suit.
 - The player who discarded cannot reclaim that discard.
 - The game preserves the active top discard during a reaction window, even if the rest of the discard pile must be reshuffled into the draw pile.
+- Restart preserves the room ID/code, host, player IDs, names, membership, and seat order without returning to lobby readiness or requiring rejoining.
+- Restart shuffles a fresh standard 52-card deck and deals four cards per player. Players privately peek at their first two cards and confirm opening `Ready` again; the first seat starts. Individual cards can coincidentally repeat after a shuffle.
+- Restart clears all prior match state: penalties, removed slots, discard history, drawn cards, powers, reactions, swap events, activity, the final round, and winners.
 
 ## API surface in use
 
@@ -129,6 +138,7 @@ Current frontend flow depends on these backend endpoints:
 - `POST /api/rooms/join`
 - `GET /api/rooms/{roomId}?player_id=...`
 - `POST /api/rooms/{roomId}/ready`
+- `POST /api/rooms/{roomId}/restart` with `{ "player_id": "..." }`: returns a host-filtered `RoomSummary` with a new `game.game_id`; non-host requests return `403`, missing rooms return `404`, and rooms without a game return `400`.
 - `POST /api/rooms/{roomId}/opening-ready`
 - `POST /api/rooms/{roomId}/draw`
 - `POST /api/rooms/{roomId}/discard`

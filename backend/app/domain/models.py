@@ -168,6 +168,7 @@ class PlayerLayout(BaseModel):
 
 
 class GameSetup(BaseModel):
+    game_id: str = Field(default_factory=lambda: str(uuid4()))
     room_id: str
     players: list[PlayerLayout]
     draw_pile: list[Card]
