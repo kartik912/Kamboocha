@@ -309,13 +309,25 @@ describe('drawn card panel', () => {
     expect(screen.queryByRole('button', { name: 'Discard it' })).not.toBeInTheDocument()
   })
 
-  it('auto-advances a completed turn and removes the manual end-turn action', async () => {
+  it.each([false, true])('waits for a manual turn choice (call Kamboocha: %s)', async (callKamboocha) => {
     const nextRoom = makeRoom({ current_player_id: OTHER, turn_phase: 'draw', reaction_window: null })
-    await renderGame(makeRoom({ current_player_id: ME, turn_phase: 'post_turn', reaction_window: null }), nextRoom)
+    const { user } = await renderGame(makeRoom({ current_player_id: ME, turn_phase: 'post_turn', reaction_window: null }), nextRoom)
+
+    await waitFor(() => expect(calls.filter((call) => call.method === 'GET' && call.url.includes(ROOM_ID)).length).toBeGreaterThan(1), { timeout: 2000 })
+    expect(calls.some((call) => call.url.endsWith('/finalize'))).toBe(false)
+    expect(screen.getByRole('button', { name: 'End turn' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Call Kamboocha' })).toBeEnabled()
+
+    if (callKamboocha) {
+      await user.click(screen.getByRole('button', { name: 'Call Kamboocha' }))
+      expect(calls.some((call) => call.url.endsWith('/finalize'))).toBe(false)
+      await user.click(screen.getByRole('button', { name: 'Confirm Kamboocha' }))
+    } else {
+      await user.click(screen.getByRole('button', { name: 'End turn' }))
+    }
 
     await waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.url === `/api/rooms/${ROOM_ID}/finalize`)).toBe(true))
-    expect(screen.queryByRole('button', { name: 'End turn' })).not.toBeInTheDocument()
-    expect(calls.find((call) => call.url.endsWith('/finalize'))?.body).toEqual({ player_id: ME, call_kamboocha: false })
+    expect(calls.find((call) => call.url.endsWith('/finalize'))?.body).toEqual({ player_id: ME, call_kamboocha: callKamboocha })
   })
 })
 

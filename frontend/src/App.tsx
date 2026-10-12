@@ -664,27 +664,6 @@ function App() {
     }
   }, [canFinalizeTurn])
 
-  useEffect(() => {
-    if (
-      !room ||
-      !game ||
-      !isCurrentTurn ||
-      game.stage !== 'active' ||
-      game.turn_phase !== 'post_turn' ||
-      reactionWindow !== null ||
-      confirmingKamboocha ||
-      pendingAction !== null
-    ) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      void handleFinalizeTurn(false)
-    }, 350)
-
-    return () => window.clearTimeout(timeoutId)
-  }, [room, game, isCurrentTurn, reactionWindow, confirmingKamboocha, pendingAction])
-
   const leaderboardPlayers: LeaderboardPlayer[] =
     game?.stage === 'finished'
       ? game.players
@@ -1536,7 +1515,7 @@ function App() {
               </div>
             ) : null}
 
-            {canFinalizeTurn && game.kamboocha_caller_id === null ? (
+            {canFinalizeTurn ? (
               <div className="finalize-controls">
                 <div className="button-row center-row">
                   {confirmingKamboocha || pendingAction === 'call-kamboocha' ? (
@@ -1549,9 +1528,16 @@ function App() {
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(true)}>
-                      Call Kamboocha
-                    </button>
+                    <>
+                      <button type="button" className="secondary-button" disabled={pendingAction !== null} onClick={() => handleFinalizeTurn(false)}>
+                        {pendingAction === 'end-turn' ? 'Ending turn...' : 'End turn'}
+                      </button>
+                      {game.kamboocha_caller_id === null ? (
+                        <button type="button" className="danger-button" disabled={pendingAction !== null} onClick={() => setConfirmingKamboocha(true)}>
+                          Call Kamboocha
+                        </button>
+                      ) : null}
+                    </>
                   )}
                 </div>
                 {confirmingKamboocha ? (

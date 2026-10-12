@@ -126,6 +126,7 @@ Host-restart implementation validation: `npm run test -- src/App.test.tsx` passe
 - Matching discarded cards is based on rank, not suit.
 - The player who discarded cannot reclaim that discard.
 - The game preserves the active top discard during a reaction window, even if the rest of the discard pile must be reshuffled into the draw pile.
+- After resolving a draw/discard/swap and any power, once any reaction window closes, the acting player must choose `End turn` or `Call Kamboocha`; turns do not finish automatically. `Call Kamboocha` requires confirmation, and `Cancel` leaves the turn unfinished. Once Kamboocha has been called, remaining final-round players see only `End turn`.
 - Restart preserves the room ID/code, host, player IDs, names, membership, and seat order without returning to lobby readiness or requiring rejoining.
 - Restart shuffles a fresh standard 52-card deck and deals four cards per player. Players privately peek at their first two cards and confirm opening `Ready` again; the first seat starts. Individual cards can coincidentally repeat after a shuffle.
 - Restart clears all prior match state: penalties, removed slots, discard history, drawn cards, powers, reactions, swap events, activity, the final round, and winners.
