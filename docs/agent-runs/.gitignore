@@ -1,0 +1,5 @@
+# Transient pointer to the currently active run (local only).
+.active
+
+# Events captured when no pipeline run is active (unrelated sessions).
+_unassigned.events.jsonl
