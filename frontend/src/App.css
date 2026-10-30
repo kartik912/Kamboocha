@@ -568,23 +568,6 @@
   color: #081530;
 }
 
-/* Landing "Create Room" call-to-action: fancy red.
-   Compound selector beats the equal-specificity `.primary-button, .large-button`
-   cyan background regardless of source order. Scoped to this one button only. */
-.primary-button.create-room-button {
-  background: linear-gradient(135deg, #d24171, #8c173c);
-  color: #fff0f6;
-  box-shadow: 0 0 20px rgba(213, 60, 112, 0.5);
-}
-
-.primary-button.create-room-button:hover:not(:disabled) {
-  box-shadow: 0 0 28px rgba(213, 60, 112, 0.75);
-}
-
-.primary-button.create-room-button:focus-visible {
-  outline-color: var(--cyan);
-}
-
 .secondary-button,
 .card-action {
   background: rgba(17, 38, 102, 0.9);

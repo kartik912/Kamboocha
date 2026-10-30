@@ -986,7 +986,7 @@ function App() {
           <div className="landing-panel">
             {landingMode === null ? (
               <div className="choice-stack">
-                <button type="button" className="primary-button large-button create-room-button" onClick={() => setLandingMode('create')}>
+                <button type="button" className="primary-button large-button" onClick={() => setLandingMode('create')}>
                   Create Room
                 </button>
                 <button type="button" className="secondary-button large-button" onClick={() => setLandingMode('join')}>
