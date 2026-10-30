@@ -487,11 +487,10 @@ describe('power target slot dropdown', () => {
   })
 })
 
-describe('landing Create Room button styling', () => {
-  // Visual-only restyle: the landing "Create Room" button is scoped red via a
-  // `create-room-button` modifier class. jsdom cannot resolve CSS gradients/colors,
-  // so these assert on className presence (the hook that applies the red styling),
-  // not computed colors.
+describe('landing Create Room button styling (blue)', () => {
+  // Visual-only: the landing "Create Room" button uses the shared blue primary style
+  // (`primary-button large-button`, no modifier class). jsdom cannot resolve CSS
+  // gradients/colors, so these assert on exact className values, not computed colors.
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
@@ -505,19 +504,18 @@ describe('landing Create Room button styling', () => {
     )
   })
 
-  it('gives the landing Create Room button the create-room-button modifier while keeping its base classes', () => {
+  it('renders the landing Create Room button with the shared blue primary classes only', () => {
     render(<App />)
 
     const createButton = screen.getByRole('button', { name: 'Create Room' })
-    expect(createButton).toHaveClass('primary-button', 'large-button', 'create-room-button')
+    expect(createButton.className).toBe('primary-button large-button')
   })
 
-  it('does not apply the create-room-button modifier to the adjacent Join Room button', () => {
+  it('renders the adjacent Join Room button with the unchanged secondary classes', () => {
     render(<App />)
 
     const joinButton = screen.getByRole('button', { name: 'Join Room' })
-    expect(joinButton).toHaveClass('secondary-button', 'large-button')
-    expect(joinButton).not.toHaveClass('create-room-button')
+    expect(joinButton.className).toBe('secondary-button large-button')
   })
 
   it('still switches to the create form when the Create Room button is clicked by its accessible name', async () => {
@@ -532,14 +530,13 @@ describe('landing Create Room button styling', () => {
     expect(screen.queryByRole('button', { name: 'Join Room' })).not.toBeInTheDocument()
   })
 
-  it('does not carry the create-room-button modifier onto the in-form Create room submit button', async () => {
+  it('renders the in-form Create room submit button with the plain primary class', async () => {
     const user = userEvent.setup()
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'Create Room' }))
 
     const submitButton = screen.getByRole('button', { name: 'Create room' })
-    expect(submitButton).toHaveClass('primary-button')
-    expect(submitButton).not.toHaveClass('create-room-button')
+    expect(submitButton.className).toBe('primary-button')
   })
 })
